@@ -1,0 +1,31 @@
+name: videonoise
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - ffmpeg  # system ffmpeg via conda-forge (no protobuf conflict)
+  - pip:
+    - torch==2.5.1
+    - torchvision==0.20.1
+    - torchaudio==2.5.1
+    - opencv-python==4.9.0.80   # pip opencv bundles its own libs, avoids protobuf conflict
+    - numpy==1.26.4
+    - scipy==1.13.1
+    - scikit-image==0.23.2
+    - scikit-learn==1.5.1
+    - matplotlib==3.9.1
+    - seaborn==0.13.2
+    - tqdm==4.66.4
+    - imageio==2.34.2
+    - imageio-ffmpeg
+    - einops==0.8.0
+    - jupyter
+    - ipykernel
+    - diffusers>=0.26
+    - transformers
+    - accelerate
+    - umap-learn
+    - lpips
+    - pyyaml

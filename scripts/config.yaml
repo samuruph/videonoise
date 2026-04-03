@@ -1,0 +1,74 @@
+# ============================================================
+# videonoise experiment config
+# Edit here, then run:  bash scripts/run_all.sh
+#                  or:  bash scripts/steps/01_generate_videos.sh
+# ============================================================
+
+# --- Paths ---
+data_real: data/real/DAVIS/JPEGImages/480p/
+data_gen:  data/generated/
+results:   results/
+
+# --- Video loading ---
+max_frames: 32
+resize: [128, 128]      # [W, H]
+
+# --- Model ---
+# svd         ~14 GB  image-to-video  (random conditioning image, fastest)
+# svd_t2v     ~21 GB  text-to-video   (SDXL generates conditioning image → SVD animates it)
+# modelscope  ~7 GB   text-to-video
+# cogvideox   ~14 GB  text-to-video   (49 frames at 8 fps)
+# wan         ~6 GB   text-to-video   (requires diffusers >= 0.32)
+model: modelscope #svd
+model_id: null          # leave null to use the default SVD HuggingFace ID
+t2i_model_id: null      # leave null to use sdxl-base-1.0  [svd_t2v only]
+
+# --- Noise initialization ---
+# gaussian | ar1 | spatial_lowpass | blue | perlin
+noise_type: gaussian
+alpha: 0.8              # AR(1) temporal coefficient  [ar1]
+sigma: 2.0              # Spatial low-pass sigma      [spatial_lowpass]
+
+# --- Generation ---
+# MPS (Apple Silicon): keep num_frames <= 8 and num_steps <= 20 to avoid OOM.
+# CUDA: num_frames up to 25, num_steps up to 50 is fine.
+n_videos:   4
+num_frames: 8
+num_steps:  50 #20
+seed:       42
+
+# --- Prompts (text-to-video models) ---
+# 'active_prompt' is the one used by the scripts.
+# Switch to 'benchmark' to iterate over the full list (see 01_generate_videos.sh).
+active_prompt: "A dog running on a beach"
+
+# Standard benchmark prompts (drawn from VBench, EvalCrafter, UCF-101 categories)
+benchmark_prompts:
+
+  # --- Motion / dynamics ---
+  - "A dog running on a beach"
+  - "A person walking in a city at night"
+  - "Waves crashing on a rocky shore"
+  - "A dancer performing on stage under dramatic lighting"
+  - "A car driving along a mountain road"
+  - "A bird flying over the ocean at sunrise"
+
+  # --- Nature / environment ---
+  - "Time lapse of clouds moving across the sky"
+  - "Snow falling in a quiet mountain village"
+  - "A campfire burning in a dark forest"
+  - "Autumn leaves falling from a tree in a park"
+  - "A waterfall cascading into a clear mountain lake"
+  - "A thunderstorm over a wheat field"
+
+  # --- Objects / close-up ---
+  - "A cat playing with a ball of yarn"
+  - "A candle flickering in a dark room"
+  - "Bubbles rising through a glass of water"
+  - "A spinning top on a wooden table"
+
+  # --- Human activity ---
+  - "A chef preparing food in a restaurant kitchen"
+  - "Children playing in a playground on a sunny day"
+  - "A person surfing a large wave"
+  - "Two people having a conversation in a coffee shop"

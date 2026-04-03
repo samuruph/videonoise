@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "videonoise"
+version = "0.1.0"
+description = "Analysis of noise initialization in video diffusion models"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "scikit-learn",
+    "opencv-python",
+    "matplotlib",
+    "tqdm",
+    "imageio",
+    "imageio-ffmpeg",
+]
+
+[project.optional-dependencies]
+diffusion = ["diffusers>=0.26", "transformers", "accelerate"]
+analysis  = ["umap-learn", "lpips", "clean-fid"]
+dev       = ["jupyter", "ipykernel", "pytest"]
+
+[project.scripts]
+vn-download   = "videonoise.scripts.download_data:main"
+vn-metrics    = "videonoise.metrics:_cli"
+vn-inversion  = "videonoise.noise.inversion:_cli"
+vn-noise-init = "videonoise.noise.generators:_cli"
+vn-stanalysis = "videonoise.analysis.spatiotemporal:_cli"
+vn-compare    = "videonoise.analysis.plots:_cli"
+vn-viz        = "videonoise.analysis.plots:_cli_viz"
+vn-generate   = "videonoise.diffusion.pipelines:_cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["videonoise*"]
