@@ -235,14 +235,68 @@ bash scripts/run_all.sh
 Each step reads config from `scripts/config.yaml` and can be run independently:
 
 ```bash
-bash scripts/steps/00_download_data.sh      # download / generate real reference videos
-bash scripts/steps/01_generate_videos.sh    # generate with chosen model + noise
-bash scripts/steps/02_compute_metrics.sh    # correlation, spectral, quality metrics
-bash scripts/steps/03_noise_inversion.sh    # DDPM inversion + noise stats
-bash scripts/steps/04_spatiotemporal.sh     # PCA + 3D power spectrum
+bash scripts/steps/00_download_data.sh        # download / generate real reference videos
+bash scripts/steps/01_generate_videos.sh      # generate with chosen model + noise  [GPU]
+# — OR, if you have no GPU / want pre-existing AI outputs: —
+bash scripts/steps/01b_download_generated.sh  # download pre-generated AI videos    [no GPU]
+bash scripts/steps/01c_download_matched.sh    # download matched (gen, real) pairs   [no GPU]
+bash scripts/steps/02_compute_metrics.sh      # correlation, spectral, quality metrics
+bash scripts/steps/03_noise_inversion.sh      # DDPM inversion + noise stats
+bash scripts/steps/04_spatiotemporal.sh       # PCA + 3D power spectrum
 bash scripts/steps/05_noise_init_ablation.sh  # sweep all 5 noise types
-bash scripts/steps/06_compare_results.sh    # summary table + comparison figure
+bash scripts/steps/06_compare_results.sh      # summary table + comparison figure
 ```
+
+### Step 01b — Download pre-generated videos (no GPU required)
+
+`01b_download_generated.sh` is an alternative to `01_generate_videos.sh` for machines without a GPU.
+It downloads existing AI-generated video clips and places them in `data/generated/<run_key>/` so all downstream steps work identically.
+
+**Backends:**
+
+| Backend | Description | API key |
+|---------|-------------|---------|
+| `archive` | Public-domain / CC clips from archive.org | None |
+| `hf_generated` | AI-generated evaluation sets from HuggingFace Hub | None |
+| `pexels` | Short clips from pexels.com | Free key required |
+
+```bash
+# Internet Archive — nature clips (RECOMMENDED, easiest)
+bash scripts/steps/01b_download_generated.sh
+
+# Internet Archive — custom query
+bash scripts/steps/01b_download_generated.sh archive "city street"
+
+# HuggingFace — VBench 2.0 CogVideo outputs (30k videos, default for hf_generated)
+bash scripts/steps/01b_download_generated.sh hf_generated vbench2
+
+# HuggingFace — CogVideoX-2b / 5b outputs (78 videos)
+bash scripts/steps/01b_download_generated.sh hf_generated cogvideox
+
+# HuggingFace — Wan T2V baseline outputs (121 videos)
+bash scripts/steps/01b_download_generated.sh hf_generated wan
+
+# Pexels — free API key required (https://www.pexels.com/api/)
+PEXELS_KEY=your_key bash scripts/steps/01b_download_generated.sh pexels "nature"
+```
+
+### Step 01c — Download matched (generated, real) pairs (no GPU required)
+
+`01c_download_matched.sh` downloads pairs of videos that share the same semantic prompt — one AI-generated (VBench 2.0 from HuggingFace) and one real (Internet Archive). This is the most direct setup for comparing generated vs. real content.
+
+```bash
+# 50 matched pairs, balanced across all VBench2 categories (default)
+bash scripts/steps/01c_download_matched.sh
+
+# 100 pairs
+bash scripts/steps/01c_download_matched.sh --n 100
+
+# Only Camera_Motion category, CogVideo model
+bash scripts/steps/01c_download_matched.sh \
+    --category_filter Camera_Motion --model_filter CogVideo
+```
+
+Output is written to `data/matched_pairs/<model>_<category>/` with a `pairs.json` cross-reference.
 
 Visualise intermediate results at any point (no second dataset required):
 

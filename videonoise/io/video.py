@@ -77,7 +77,10 @@ def load_video_folder(
 
     # 1. Video files
     for p in sorted(folder.glob(f"*{ext}")):
-        results.append((p.stem, load_video_cv2(str(p), **kwargs)))
+        try:
+            results.append((p.stem, load_video_cv2(str(p), **kwargs)))
+        except ValueError as exc:
+            print(f"  [warn] skipping {p.name}: {exc}")
 
     # 2. Frame-sequence subdirectories (skip if we already found video files)
     if not results:

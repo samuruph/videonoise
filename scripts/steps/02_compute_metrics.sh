@@ -26,17 +26,25 @@ echo "  Generated : $GEN_DIR  →  ${GEN_OUT}metrics.json"
 echo "================================================================"
 
 echo "  [1/2] Real videos..."
-python -m videonoise.scripts.compute_metrics \
-    --input      "$DATA_REAL" \
-    --output     "${REAL_OUT}metrics.json" \
-    --max_frames "$MAX_FRAMES" \
-    --resize     $RESIZE
+if [ -f "${REAL_OUT}metrics.json" ]; then
+    echo "  [skip] ${REAL_OUT}metrics.json already exists"
+else
+    python -m videonoise.scripts.compute_metrics \
+        --input      "$DATA_REAL" \
+        --output     "${REAL_OUT}metrics.json" \
+        --max_frames "$MAX_FRAMES" \
+        --resize     $RESIZE
+fi
 
 echo "  [2/2] Generated videos..."
-python -m videonoise.scripts.compute_metrics \
-    --input      "$GEN_DIR" \
-    --output     "${GEN_OUT}metrics.json" \
-    --max_frames "$MAX_FRAMES" \
-    --resize     $RESIZE
+if [ -f "${GEN_OUT}metrics.json" ]; then
+    echo "  [skip] ${GEN_OUT}metrics.json already exists"
+else
+    python -m videonoise.scripts.compute_metrics \
+        --input      "$GEN_DIR" \
+        --output     "${GEN_OUT}metrics.json" \
+        --max_frames "$MAX_FRAMES" \
+        --resize     $RESIZE
+fi
 
 echo "  Done. Metrics saved to ${RESULTS}<run_key>/metrics.json"

@@ -69,11 +69,7 @@ coverage.xml
 venv/
 
 # Data and results
-data/real/*
-data/generated/*
-results/metrics/*
-results/noise_stats/*
-results/plots/*
+data/*
 
 # Model weights
 models/*

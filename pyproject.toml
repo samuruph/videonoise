@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-diffusion = ["diffusers>=0.26", "transformers", "accelerate"]
+diffusion = ["diffusers>=0.26", "transformers", "accelerate", "tiktoken", "sentencepiece", "protobuf", "tokenizers"]
 analysis  = ["umap-learn", "lpips", "clean-fid"]
 dev       = ["jupyter", "ipykernel", "pytest"]
 

@@ -135,13 +135,41 @@ def _load_modelscope(model_id, device):
 
 def _load_cogvideox(model_id, device):
     from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline
+    from transformers import AutoTokenizer
     dtype = torch.bfloat16 if str(device) == "cuda" else torch.float32
     print(f"Loading CogVideoX ({model_id}) on {device} [{dtype}]...")
-    pipe = CogVideoXPipeline.from_pretrained(model_id, torch_dtype=dtype)
+
+    tokenizer = None
+    try:
+        # prefer explicitly loading a slow tokenizer with sentencepiece support
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            use_fast=False,
+            trust_remote_code=True,
+        )
+        print("Loaded tokenizer for CogVideoX successfully")
+    except Exception as exc:
+        print("WARNING: CogVideoX tokenizer load failed; will try pipeline default.", exc)
+
+    load_kwargs = {
+        "torch_dtype": dtype,
+        "trust_remote_code": True,
+    }
+    if tokenizer is not None:
+        load_kwargs["tokenizer"] = tokenizer
+
+    pipe = CogVideoXPipeline.from_pretrained(model_id, **load_kwargs)
+
+    # Enable memory optimizations for large models
+    # pipe.enable_attention_slicing(1)  # Aggressive slicing
+    # pipe.enable_vae_slicing()         # Decode one frame at a time
+    # pipe.enable_vae_tiling()          # Tile large frames
+
     if str(device) == "cuda":
         pipe.enable_model_cpu_offload()
     else:
-        pipe.to(device)
+        # Explicitly convert to float32 on MPS/CPU to avoid unsupported float64 conversion errors.
+        pipe.to(device, torch.float32)
     return pipe
 
 

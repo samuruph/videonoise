@@ -94,3 +94,41 @@ def _cli() -> None:
 
     save_json({"per_video": per_video, "aggregate": _agg(per_video)}, args.output)
     print(f"Saved → {args.output}")
+
+
+def compute_metrics_for_folder(input_path: str, output_path: str, max_frames: int = 64, resize: tuple[int, int] | None = None) -> None:
+    """Compute metrics for all videos in a folder and save JSON.
+
+    This is the programmatic version used by other scripts.
+    """
+    import numpy as np
+    from videonoise.io import load_video_folder
+    from videonoise.utils import save_json
+
+    videos = load_video_folder(input_path, max_frames=max_frames, resize=resize)
+    if not videos:
+        print(f"No .mp4 files found in {input_path}")
+        return
+
+    per_video = {}
+    for name, video in videos:
+        print(f"Processing {name} {tuple(video.shape)}")
+        per_video[name] = compute_all_metrics(video, name)
+
+    def _agg(results):
+        agg = {}
+        for key in next(iter(results.values())):
+            sub = next(iter(results.values()))[key]
+            if isinstance(sub, (int, float)):
+                vals = [r[key] for r in results.values() if isinstance(r.get(key), (int, float))]
+                agg[key] = {"mean": float(np.mean(vals)), "std": float(np.std(vals))}
+            elif isinstance(sub, dict):
+                agg[key] = {}
+                for sk in sub:
+                    sv = [r[key].get(sk) for r in results.values() if isinstance(r[key].get(sk), (int, float))]
+                    if sv:
+                        agg[key][sk] = {"mean": float(np.mean(sv)), "std": float(np.std(sv))}
+        return agg
+
+    save_json({"per_video": per_video, "aggregate": _agg(per_video)}, output_path)
+    print(f"Saved → {output_path}")

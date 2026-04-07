@@ -5,13 +5,13 @@
 # ============================================================
 
 # --- Paths ---
-data_real: data/real/DAVIS/JPEGImages/480p/
-data_gen:  data/generated/
+data_real: data/real/DAVIS/Videos/480p/
+data_gen:  data/generated/      # parent dir; subdirs are <model>_<noise_type>/
 results:   results/
 
 # --- Video loading ---
 max_frames: 32
-resize: [128, 128]      # [W, H]
+resize: [512,768] #[128, 128]      # [W, H]
 
 # --- Model ---
 # svd         ~14 GB  image-to-video  (random conditioning image, fastest)
@@ -19,21 +19,21 @@ resize: [128, 128]      # [W, H]
 # modelscope  ~7 GB   text-to-video
 # cogvideox   ~14 GB  text-to-video   (49 frames at 8 fps)
 # wan         ~6 GB   text-to-video   (requires diffusers >= 0.32)
-model: modelscope #svd
-model_id: null          # leave null to use the default SVD HuggingFace ID
+model: hf       # prefix for the run key: hf_wan → data/generated/hf_wan/
+model_id: wan   # used by generation; also sets noise_type suffix when model=hf
 t2i_model_id: null      # leave null to use sdxl-base-1.0  [svd_t2v only]
 
 # --- Noise initialization ---
 # gaussian | ar1 | spatial_lowpass | blue | perlin
-noise_type: gaussian
+noise_type: wan     # combined with model → run key "hf_wan"
 alpha: 0.8              # AR(1) temporal coefficient  [ar1]
 sigma: 2.0              # Spatial low-pass sigma      [spatial_lowpass]
 
 # --- Generation ---
 # MPS (Apple Silicon): keep num_frames <= 8 and num_steps <= 20 to avoid OOM.
 # CUDA: num_frames up to 25, num_steps up to 50 is fine.
-n_videos:   4
-num_frames: 8
+n_videos:   100
+num_frames: 32
 num_steps:  50 #20
 seed:       42
 
