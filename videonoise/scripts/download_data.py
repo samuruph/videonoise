@@ -872,6 +872,269 @@ def download_matched_pairs(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Matched pairs — DeepAction v1  (real + generated, same action class)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DEEPACTION_REPO          = "faridlab/deepaction_v1"
+_DEEPACTION_DEFAULT_MODEL = "CogVideoX5B"
+_DEEPACTION_REAL_DIR      = "Pexels"   # top-level dir containing real footage
+_DEEPACTION_MODELS = [
+    "BDAnimateDiffLightning",
+    "CogVideoX5B",
+    "RunwayML",
+    "StableDiffusion",
+    "Veo",
+    "VideoPoet",
+]
+
+
+def download_deepaction_pairs(
+    output_dir: str,
+    n: int = 50,
+    gen_model: str = _DEEPACTION_DEFAULT_MODEL,
+) -> None:
+    """
+    Download matched (real, generated) video pairs from DeepAction v1.
+
+    Dataset  : faridlab/deepaction_v1  (HuggingFace, CC BY 4.0, no login needed)
+    Real src : Pexels/<action_class>/<video>.mp4
+    Gen src  : <model>/<action_class>/<video>.mp4
+
+    Pairs are matched first by exact (class, filename) — genuine 1-1 semantic
+    correspondence.  If filenames differ, falls back to class-level pairing.
+    captions.csv is downloaded alongside the videos.
+
+    gen_model options:
+        One of _DEEPACTION_MODELS   → outputs saved to generated_<model>/
+        "all"                       → downloads all models, each to generated_<model>/
+                                      N pairs are selected from the intersection of
+                                      files available in ALL models + Pexels.
+
+    Output layout::
+
+        <output_dir>/
+          real/video_000.mp4              ← Pexels footage
+          generated_CogVideoX5B/video_000.mp4   ← per-model dirs
+          generated_RunwayML/video_000.mp4
+          …
+          captions.csv                    ← prompt used for each video
+          pairs.json                      ← action_class, hf paths, match type
+
+    Args:
+        n         : Number of pairs (default 50, balanced across action classes).
+        gen_model : AI model to use, or "all" to download every model (default CogVideoX5B).
+    """
+    try:
+        from huggingface_hub import list_repo_files, hf_hub_download
+    except ImportError:
+        raise SystemExit("huggingface_hub is required: pip install huggingface_hub")
+
+    import shutil
+    import random
+    from collections import defaultdict
+
+    out      = Path(output_dir)
+    real_dir = out / "real"
+    real_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine which model(s) to use
+    models = _DEEPACTION_MODELS if gen_model == "all" else [gen_model]
+
+    # Create per-model output dirs
+    gen_dirs = {m: out / f"generated_{m}" for m in models}
+    for d in gen_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+
+    print(f"Listing files in {_DEEPACTION_REPO}…")
+    try:
+        all_files = list(list_repo_files(_DEEPACTION_REPO, repo_type="dataset"))
+    except Exception as exc:
+        raise SystemExit(f"[error] Could not list files: {exc}")
+
+    mp4s     = [f for f in all_files if f.lower().endswith(".mp4")]
+    top_dirs = {f.split("/")[0] for f in mp4s if "/" in f}
+
+    if _DEEPACTION_REAL_DIR not in top_dirs:
+        raise SystemExit(
+            f"No '{_DEEPACTION_REAL_DIR}/' directory found in {_DEEPACTION_REPO}.\n"
+            f"Available top-level dirs: {sorted(top_dirs)}")
+
+    missing = [m for m in models if m not in top_dirs]
+    if missing:
+        available = sorted(top_dirs - {_DEEPACTION_REAL_DIR})
+        raise SystemExit(
+            f"Model(s) not found in {_DEEPACTION_REPO}: {missing}\n"
+            f"Available: {available}")
+
+    # ── Download captions.csv ────────────────────────────────────────────────
+    csv_dest = out / "captions.csv"
+    if not csv_dest.exists():
+        csv_files = [f for f in all_files if f.lower().endswith("captions.csv")]
+        if csv_files:
+            print(f"  Downloading {csv_files[0]}…")
+            try:
+                cached = hf_hub_download(
+                    _DEEPACTION_REPO, csv_files[0], repo_type="dataset")
+                shutil.copy2(cached, csv_dest)
+                print(f"  captions.csv → {csv_dest}")
+            except Exception as exc:
+                print(f"  [warn] Could not download captions.csv: {exc}")
+        else:
+            print("  [warn] No captions.csv found in repo")
+    else:
+        print(f"  captions.csv already exists")
+
+    # ── Build relative-path lookups ──────────────────────────────────────────
+    # rel_path = everything after the top-level dir  (class/filename.mp4)
+    real_lookup: dict = {}          # rel → hf_path
+    gen_lookups: dict = {m: {} for m in models}
+    for f in mp4s:
+        top, _, rel = f.partition("/")
+        if not rel:
+            continue
+        if top == _DEEPACTION_REAL_DIR:
+            real_lookup[rel] = f
+        elif top in gen_lookups:
+            gen_lookups[top][rel] = f
+
+    # ── Match strategy 1: exact (class/filename intersection) ───────────────
+    common_rels = set(real_lookup.keys())
+    for m in models:
+        common_rels &= gen_lookups[m].keys()
+
+    # Each entry: (rel, real_hf, {model: gen_hf})
+    exact = [
+        (rel, real_lookup[rel], {m: gen_lookups[m][rel] for m in models})
+        for rel in sorted(common_rels)
+    ]
+    match_type = "exact"
+
+    # ── Match strategy 2: class-level fallback ───────────────────────────────
+    if not exact:
+        print("  No exact filename matches; pairing within each action class…")
+        match_type = "class"
+        real_by_cls: dict = defaultdict(list)
+        gen_by_cls:  dict = {m: defaultdict(list) for m in models}
+        for rel, hf in real_lookup.items():
+            real_by_cls[rel.split("/")[0]].append((rel, hf))
+        for m in models:
+            for rel, hf in gen_lookups[m].items():
+                gen_by_cls[m][rel.split("/")[0]].append((rel, hf))
+
+        rng   = random.Random(42)
+        exact = []
+        shared_cls = set(real_by_cls.keys())
+        for m in models:
+            shared_cls &= gen_by_cls[m].keys()
+
+        for cls in sorted(shared_cls):
+            reals = real_by_cls[cls][:]
+            gens  = {m: gen_by_cls[m][cls][:] for m in models}
+            rng.shuffle(reals)
+            for m in models:
+                rng.shuffle(gens[m])
+            min_len = min(len(reals), min(len(gens[m]) for m in models))
+            for j in range(min_len):
+                r_rel, r_hf = reals[j]
+                gen_hfs = {m: gens[m][j][1] for m in models}
+                exact.append((cls + "/" + r_rel, r_hf, gen_hfs))
+
+    print(f"  {len(exact)} matchable pairs ({match_type} matching), "
+          f"selecting {min(n, len(exact))}…")
+
+    # ── Balance across action classes ────────────────────────────────────────
+    by_cls: dict = defaultdict(list)
+    for entry in exact:
+        by_cls[entry[0].split("/")[0]].append(entry)
+
+    classes = sorted(by_cls.keys())
+    per_cls = max(1, -(-n // len(classes)))
+    rng     = random.Random(42)
+    selected = []
+    for cls in classes:
+        items = by_cls[cls][:]
+        rng.shuffle(items)
+        selected.extend(items[:per_cls])
+    rng.shuffle(selected)
+    selected = selected[:n]
+
+    print(f"  Selected {len(selected)} pairs across {len(classes)} action classes")
+
+    # ── Download pairs ───────────────────────────────────────────────────────
+    pairs = []
+    for i, (rel, real_hf, gen_hfs) in enumerate(selected):
+        action_cls = rel.split("/")[0]
+        print(f"\n  [{i+1}/{len(selected)}] [{action_cls}]  {Path(real_hf).name}")
+
+        real_path = real_dir / f"video_{i:03d}.mp4"
+
+        # Generated videos — one file per model
+        gen_ok = True
+        gen_paths: dict = {}
+        for m, g_hf in gen_hfs.items():
+            gp = gen_dirs[m] / f"video_{i:03d}.mp4"
+            if not gp.exists():
+                print(f"    ↓ {m:30s}  {Path(g_hf).name}")
+                try:
+                    cached = hf_hub_download(
+                        _DEEPACTION_REPO, g_hf, repo_type="dataset")
+                    shutil.copy2(cached, gp)
+                    gen_paths[m] = gp.name
+                except Exception as exc:
+                    print(f"    [skip] {m} download failed: {exc}")
+                    gen_ok = False
+            else:
+                print(f"    ✓ {m:30s}  {gp.name} already exists")
+                gen_paths[m] = gp.name
+
+        if not gen_ok:
+            continue   # skip pair if any model failed
+
+        # Real video
+        real_path_str = None
+        if not real_path.exists():
+            print(f"    ↓ {'real (Pexels)':30s}  {Path(real_hf).name}")
+            try:
+                cached = hf_hub_download(
+                    _DEEPACTION_REPO, real_hf, repo_type="dataset")
+                shutil.copy2(cached, real_path)
+                real_path_str = real_path.name
+            except Exception as exc:
+                print(f"    [skip] real download failed: {exc}")
+        else:
+            print(f"    ✓ {'real (Pexels)':30s}  {real_path.name} already exists")
+            real_path_str = real_path.name
+
+        pairs.append({
+            "idx":          i,
+            "action_class": action_cls,
+            "match_type":   match_type,
+            "hf_real":      real_hf,
+            "hf_generated": gen_hfs,
+            "real":         real_path_str,
+            "generated":    gen_paths,   # {model_name: filename}
+        })
+
+    # ── Write pairs.json ─────────────────────────────────────────────────────
+    n_complete = sum(1 for p in pairs if p["real"] is not None)
+    pairs_path = out / "pairs.json"
+    with open(pairs_path, "w") as f:
+        json.dump({
+            "source":      _DEEPACTION_REPO,
+            "gen_models":  models,
+            "match_type":  match_type,
+            "n_requested": n,
+            "n_pairs":     len(pairs),
+            "n_complete":  n_complete,
+            "timestamp":   _now(),
+            "pairs":       pairs,
+        }, f, indent=2)
+
+    print(f"\n  Done. {len(pairs)} pairs ({n_complete} complete) in {out}/")
+    print(f"  pairs.json → {pairs_path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -923,7 +1186,7 @@ def main() -> None:
     parser.add_argument(
         "--dataset",
         choices=["davis", "synthetic", "archive", "pexels", "hf_generated",
-                 "matched_pairs"],
+                 "matched_pairs", "deepaction_pairs"],
         default="synthetic",
     )
     parser.add_argument(
@@ -973,11 +1236,28 @@ def main() -> None:
         help="Glob pattern for MP4 files within the repo (e.g. '**/*.mp4')",
     )
 
-    # matched_pairs options
+    # deepaction_pairs options  (RECOMMENDED for matched pairs)
+    da = parser.add_argument_group(
+        "DeepAction options  (--dataset deepaction_pairs)  [RECOMMENDED]\n"
+        "  Downloads N matched (real, generated) pairs from faridlab/deepaction_v1.\n"
+        "  Real and generated videos share the same action class and filename.\n"
+        "  No API key or GPU required."
+    )
+    da.add_argument(
+        "--gen_model",
+        default=_DEEPACTION_DEFAULT_MODEL,
+        choices=_DEEPACTION_MODELS + ["all"],
+        help=(
+            f"AI model to use, or 'all' to download every model (default: {_DEEPACTION_DEFAULT_MODEL}).\n"
+            f"Single-model options: {', '.join(_DEEPACTION_MODELS)}"
+        ),
+    )
+
+    # matched_pairs options  (VBench2 + Internet Archive fallback)
     mp = parser.add_argument_group(
         "Matched-pairs options  (--dataset matched_pairs)\n"
-        "  Downloads N pairs of (generated, real) videos sharing the same prompt.\n"
-        "  Generated: VBench 2.0 (HF Hub, no key). Real: Internet Archive (no key)."
+        "  Downloads N pairs using VBench2 generated videos + Internet Archive real videos.\n"
+        "  Less accurate semantic matching than deepaction_pairs."
     )
     mp.add_argument(
         "--model_filter", default=None,
@@ -1051,6 +1331,11 @@ def main() -> None:
             model_filter=args.model_filter,
             category_filter=args.category_filter,
         )
+
+    elif args.dataset == "deepaction_pairs":
+        slug   = args.gen_model.lower()
+        output = args.output or f"data/matched_pairs/deepaction_{slug}/"
+        download_deepaction_pairs(output, n=n, gen_model=args.gen_model)
 
 
 if __name__ == "__main__":

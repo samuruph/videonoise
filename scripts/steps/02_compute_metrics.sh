@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Step 02 — Compute correlation, spectral, and quality metrics.
 #
-# Reads  : $DATA_REAL  and  $DATA_GEN/<model>_<noise>/
-# Writes : results/real/metrics.json
-#          results/<model>_<noise>/metrics.json
+# Reads  : $DATA_REAL  and  $DATA_GEN/<model>_<noise>/  (or GEN_DIR_OVERRIDE)
+# Writes : results/<real_dataset>__<frames>f_<w>x<h>/metrics.json
+#          results/<gen_dataset>__<frames>f_<w>x<h>/metrics.json
+#
+# Folder names are auto-derived from data paths + settings so results are
+# never confused across different datasets or resolutions.
 #
 # Run standalone:
 #   bash scripts/steps/02_compute_metrics.sh
@@ -13,9 +16,15 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 eval "$(python scripts/yaml_to_env.py scripts/config.yaml)"
 
-GEN_KEY="${MODEL}_${NOISE_TYPE}"
-GEN_DIR="${DATA_GEN}${GEN_KEY}/"
-REAL_OUT="${RESULTS}real/"
+if [ -n "${GEN_DIR_OVERRIDE:-}" ]; then
+    GEN_DIR="${GEN_DIR_OVERRIDE%/}/"
+    _GEN_BASE=$(basename "${GEN_DIR_OVERRIDE%/}")
+else
+    _GEN_BASE="${MODEL}_${NOISE_TYPE}"
+    GEN_DIR="${DATA_GEN}${_GEN_BASE}/"
+fi
+GEN_KEY="${_GEN_BASE}__${SETTINGS_SUFFIX}"
+REAL_OUT="${RESULTS}${REAL_KEY}/"
 GEN_OUT="${RESULTS}${GEN_KEY}/"
 mkdir -p "$REAL_OUT" "$GEN_OUT"
 

@@ -27,7 +27,7 @@ MODEL_ID_FLAG=""
 [ -n "${MODEL_ID:-}" ] && MODEL_ID_FLAG="--model_id $MODEL_ID"
 
 for NOISE in "${NOISE_TYPES[@]}"; do
-    RUN_KEY="${MODEL}_${NOISE}"
+    RUN_KEY="${MODEL}_${NOISE}__${SETTINGS_SUFFIX}"
     RUN_OUT="${RESULTS}${RUN_KEY}/"
     mkdir -p "$RUN_OUT"
     echo ""

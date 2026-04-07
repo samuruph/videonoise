@@ -282,21 +282,27 @@ PEXELS_KEY=your_key bash scripts/steps/01b_download_generated.sh pexels "nature"
 
 ### Step 01c — Download matched (generated, real) pairs (no GPU required)
 
-`01c_download_matched.sh` downloads pairs of videos that share the same semantic prompt — one AI-generated (VBench 2.0 from HuggingFace) and one real (Internet Archive). This is the most direct setup for comparing generated vs. real content.
+`01c_download_matched.sh` downloads pairs of videos with genuine 1-1 semantic correspondence. The default source is **DeepAction v1** (`faridlab/deepaction_v1`, CC BY 4.0) — a HuggingFace dataset that contains both real videos and AI-generated videos organized by the same action class and filename, so each pair shows the same action.
 
 ```bash
-# 50 matched pairs, balanced across all VBench2 categories (default)
+# 50 matched pairs with CogVideoX5B outputs, balanced across action classes (default)
 bash scripts/steps/01c_download_matched.sh
 
 # 100 pairs
 bash scripts/steps/01c_download_matched.sh --n 100
 
-# Only Camera_Motion category, CogVideo model
-bash scripts/steps/01c_download_matched.sh \
+# Different AI model
+bash scripts/steps/01c_download_matched.sh --gen_model RunwayML
+# Available models: BDAnimateDiffLightning  CogVideoX5B  RunwayML
+#                   StableDiffusion         Veo          VideoPoet
+
+# VBench2 + Internet Archive fallback (weaker semantic matching)
+bash scripts/steps/01c_download_matched.sh --source vbench
+bash scripts/steps/01c_download_matched.sh --source vbench \
     --category_filter Camera_Motion --model_filter CogVideo
 ```
 
-Output is written to `data/matched_pairs/<model>_<category>/` with a `pairs.json` cross-reference.
+Output is written to `data/matched_pairs/deepaction_<model>/` (or `matched_pairs/<model>_<cat>/` for `--source vbench`) with a `pairs.json` cross-reference that includes `action_class`, HF paths, and match type.
 
 Visualise intermediate results at any point (no second dataset required):
 
@@ -334,315 +340,73 @@ vn-viz results/metrics/real.json   # same, directly with label
 
 ---
 
-## Metrics Explained
-
-This section explains every metric computed by the pipeline, what it measures, how to read the numbers, and — most importantly — what to look for when comparing real vs. generated videos.
-
-The central research question is: **does the noise initialization structure affect how realistic and temporally coherent the generated video is?** Each metric probes a different aspect of that question.
-
----
-
-### Step 02 — Temporal & correlation metrics
-
----
-
-#### Frame-to-frame Pearson correlation  
-`frame_correlation.pearson_mean`
-
-Pearson *r* between consecutive grayscale frames (each frame is flattened to a 1D vector), averaged over all frame pairs in the video.
-
-| Value | What it means |
-|-------|---------------|
-| **0.95 – 0.99** | Smooth, natural motion (real footage, slow camera) |
-| **0.80 – 0.95** | Moderate motion; normal for action scenes |
-| **< 0.80** | Fast motion, scene cuts, or flickering artifacts |
-
-**Research signal:** If generated videos score lower than real at the same content type, the model produces frame-to-frame discontinuities. Try increasing `alpha` in AR(1) noise to smooth the temporal latent.
-
----
-
-#### Spearman correlation  
-`frame_correlation.spearman_mean`
-
-Rank-based version of Pearson — less sensitive to outlier pixel values and non-linear brightness shifts. Interpret the same way. A large gap between Pearson and Spearman signals non-linear artifacts (clipping, posterisation, colour shifts).
-
----
-
-#### Temporal Autocorrelation Function (ACF)  
-`temporal_acf.lag_1` … `temporal_acf.lag_10`
-
-How well the mean pixel intensity at frame *t* predicts intensity at frame *t + k*, for lags 1–10.
-
-**How to read the ACF curve:**
-
-- **Slow exponential decay** (lag-1 ≈ 0.90, lag-10 ≈ 0.50) → long temporal memory, typical of real camera footage with continuous motion.
-- **Fast decay** (lag-1 ≈ 0.90, lag-5 ≈ 0.10) → near-Markov; each frame is nearly independent beyond a short window. Common in generated videos with i.i.d. Gaussian noise.
-- **Oscillation** → periodic motion (camera pan, repetitive action).
-
-The lag at which the real video ACF falls below 0.1 is a practical guide for setting the AR(1) `alpha` parameter: `alpha ≈ ACF(lag=1)` is a good starting point.
-
-**Research signal:** Generated videos with Gaussian noise typically decay faster than real videos at lags > 3. This gap is the primary motivation for using temporally correlated noise.
-
----
-
-#### 3D low-frequency energy ratio  
-`spatiotemporal_3d.low_freq_energy_ratio`
-
-Fraction of the 3D FFT energy (T × H × W video cube) in the low-frequency octant.
-
-| Value | What it means |
-|-------|---------------|
-| **> 0.70** | Mostly smooth, coherent content — typical of real natural scenes |
-| **0.40 – 0.70** | Mixed; moderate motion or texture |
-| **< 0.40** | High-frequency dominated — noisy, flickering, or very fast motion |
-
-**Research signal:** Real landscape/nature videos typically score > 0.65. Generated videos with Gaussian noise often score 0.40–0.55. AR(1) or spatially low-pass noise initialization shifts this toward 0.60+.
-
----
-
-### Step 02 — Spectral metrics
-
----
-
-#### Spatial power spectrum slope  
-`spatial_power_spectrum.spectral_slope`
-
-The log-log slope of the radially-averaged 2D power spectrum, averaged across frames. This measures how spatial frequency energy is distributed across a frame.
-
-**Natural images obey a 1/f² power law**, so the expected value is **≈ −2.0**.
-
-| `spectral_slope` | Interpretation |
-|------------------|---------------|
-| **−1.8 to −2.2** | Consistent with natural image statistics |
-| **> −1.5** (flatter) | Over-sharpened or noisy at high frequencies |
-| **< −2.5** (steeper) | Over-smoothed or blurry frames |
-
-**Research signal:** Perlin and spatially low-pass noise initializations tend to push generated frames toward steeper slopes (more low-frequency energy). Blue noise pushes toward flatter slopes. The noise type that produces slopes closest to −2.0 for your content type is the most natural.
-
----
-
-#### Spectral R²  
-`spatial_power_spectrum.spectral_r2`
-
-How well the power spectrum fits a power law (coefficient of determination from the log-log linear regression).
-
-- **R² > 0.95** → well-described by a power law; natural.
-- **R² < 0.80** → spectrum has bumps or breaks at specific frequencies, suggesting model artifacts.
-
----
-
-### Step 02 — Quality metrics
-
----
-
-#### Temporal Consistency Score (TCS) / Temporal SSIM  
-`temporal_ssim.temporal_ssim_mean`
-
-SSIM (Structural Similarity Index) between each pair of consecutive frames, averaged over the whole video. SSIM jointly measures luminance similarity, contrast similarity, and local structural similarity.
-
-| TCS value | Interpretation |
-|-----------|---------------|
-| **0.90 – 1.00** | Excellent temporal coherence; very smooth video |
-| **0.75 – 0.90** | Good; some motion but structurally consistent |
-| **0.50 – 0.75** | Moderate; visible temporal changes, possibly flickering |
-| **< 0.50** | Poor coherence; strong flickering or large scene changes |
-
-> **TCS is the single most important metric for this project** — it directly quantifies whether consecutive frames look structurally similar, which is what "temporal coherence" means perceptually.
-
-**Research signal:** The noise ablation (step 05) should show TCS increasing as `alpha` increases from 0 to ~0.8, then decreasing at very high alpha (over-correlated noise makes videos look static). The optimal alpha is where TCS peaks while optical flow magnitude remains realistic.
-
----
-
-#### PSNR between consecutive frames  
-`psnr.psnr_mean` (dB)
-
-Peak Signal-to-Noise Ratio between frame pairs. Sensitive to overall pixel brightness differences.
-
-| PSNR (dB) | Interpretation |
-|-----------|---------------|
-| **> 35 dB** | High similarity; near-static content |
-| **25 – 35 dB** | Normal motion |
-| **< 25 dB** | Large frame differences; fast motion or flickering |
-
-> Unlike image restoration benchmarks, *excessively high PSNR* here could indicate the model collapsed to a near-constant output (too little motion).
-
-PSNR and TCS complement each other: PSNR is sensitive to global brightness changes; TCS is sensitive to local structural changes. A video can have high PSNR but low TCS if it has flickering that preserves overall brightness.
-
----
-
-#### Optical flow magnitude  
-`optical_flow.flow_mag_mean`, `flow_mag_p95`, `flow_mag_std`
-
-Dense Farneback optical flow (pixel displacement vectors) between consecutive frames.
-
-| `flow_mag_mean` (px) | Typical scene |
-|----------------------|---------------|
-| **0 – 1** | Near-static (talking head, locked-off camera) |
-| **1 – 5** | Moderate motion (walking, slow pan) |
-| **5 – 20** | Fast motion (sports, fast camera) |
-
-`flow_mag_p95` and `flow_mag_p99` are the 95th/99th percentile displacements. In real videos, these tail values come from fast-moving objects. In generated videos with Gaussian noise, high tail values often correspond to small flickering patches rather than real motion — a tell-tale generation artifact.
-
-**Research signal:**
-- Real videos: spatially smooth, coherent flow fields (displacement is organised).
-- Generated videos (Gaussian): irregular flow with higher `flow_mag_std` (displacement variance).
-- AR(1) or spatially low-pass noise: smoother, more organised flow (lower std, lower p99).
-
----
-
-#### Frame statistics  
-`frame_statistics.mean / std / skewness / kurtosis`
-
-Per-video pixel intensity statistics, averaged over frames.
-
-| Statistic | Natural range | Flag if… |
-|-----------|---------------|----------|
-| `mean` | 0.35 – 0.65 | < 0.15 or > 0.85 (very dark or overexposed) |
-| `std` | 0.10 – 0.30 | < 0.05 (low contrast / flat) or > 0.40 (oversaturated) |
-| `skewness` | −0.5 – 0.5 | \|skew\| > 1.5 (strong brightness bias) |
-| `kurtosis` | 0 – 5 | > 10 (very spiky histogram — banding / clipping) |
-
----
-
-### Step 03 — Noise inversion metrics
-
-These metrics characterise the noise latent recovered by running the DDPM forward process in reverse.  
-For **generated videos** (known seed), this verifies inversion quality.  
-For **real videos**, it reveals what noise structure the model would need to "explain" them — the key signal for motivating structured initialization.
-
----
-
-#### KL divergence from N(0,1)  
-`statistics.kl_from_gaussian`
-
-How many nats the recovered noise distribution is away from a standard Gaussian.
-
-| KL value | Interpretation |
-|----------|---------------|
-| **< 0.05** | Nearly Gaussian — inversion is working; noise is well-behaved |
-| **0.05 – 0.20** | Mild non-Gaussianity — slight bias or scale mismatch |
-| **> 0.20** | Meaningful structure in the noise |
-
-**Research signal:** If inverting **real videos** gives KL > 0.10, their temporal statistics cannot be explained by i.i.d. Gaussian noise. This directly motivates structured initialization.
-
----
-
-#### Kolmogorov-Smirnov p-value  
-`statistics.ks_p_value`
-
-Hypothesis test for Gaussianity.
-
-- **p > 0.05** → cannot reject Gaussianity at 5% significance (noise looks Gaussian).
-- **p < 0.05** → significantly non-Gaussian.
-- **p < 0.001** → strongly non-Gaussian.
-
----
-
-#### Noise mean, std, skewness, kurtosis
-
-For ideal i.i.d. Gaussian latent noise:
-
-| Statistic | Ideal |
-|-----------|-------|
-| `mean` | ≈ 0.0 |
-| `std` | ≈ 1.0 |
-| `skewness` | ≈ 0.0 |
-| `kurtosis` (excess) | ≈ 0.0 |
-
-Deviations indicate the inversion has introduced a systematic bias (`mean` ≠ 0), that the noise has heavier tails than Gaussian (`kurtosis` > 0), or that it is asymmetric (`skewness` ≠ 0).
-
----
-
-#### Cross-frame correlation of inverted noise  
-`cross_frame_correlation.cross_frame_corr_mean`
-
-Pearson correlation between consecutive time-slices of the recovered noise latent.
-
-| Value | Interpretation |
-|-------|---------------|
-| **≈ 0.0** | Independent slices — consistent with i.i.d. initialization |
-| **0.05 – 0.15** | Weak temporal structure |
-| **> 0.15** | Strong temporal structure — consecutive latent frames are correlated |
-
-> **This is the most actionable inversion metric.**  
-> - Inverted noise of **generated videos** with cross-frame corr ≈ 0: Gaussian initialization was fine.  
-> - Inverted noise of **real videos** with cross-frame corr > 0.15: the model needs temporally correlated noise to reproduce those statistics. Set AR(1) `alpha ≈ cross_frame_corr_mean` as a starting point.
-
----
-
-#### Noise power spectrum slope  
-`power_spectrum.spectral_slope_1d`
-
-Spectral slope of the flattened noise tensor (spatial + temporal combined).
-
-- **Slope ≈ 0** → white noise (i.i.d. Gaussian, as expected).
-- **Slope < −0.3** → low frequencies are stronger; noise has spatial/temporal smoothness.
-- **Slope > +0.3** → high frequencies are stronger (blue-noise-like).
-
-**Research signal:** Inverted real video noise with slope < −0.5 suggests spatially low-pass or Perlin noise would better match the latent statistics than Gaussian.
-
----
-
-### Step 04 — Spatio-temporal analysis
-
----
-
-#### PCA spatial modes  
-`results/plots/*_st/pca_spatial_mode_*.png`
-
-The video tensor is treated as T observations of an (H × W) spatial field. PCA finds the spatial patterns that vary most over time.
-
-- **Mode 0** (first PC, highest variance): the dominant spatial region that changes most across frames — usually the main moving object or camera motion direction.
-- **Modes 1–3**: progressively subtler patterns.
-- **Sharp, localised modes** → structured motion (e.g. a moving foreground object).
-- **Diffuse, noisy modes** → unstructured temporal variation (flickering or noise-driven changes).
-
-**Research signal:** Compare PCA modes of real vs. generated videos qualitatively. If generated video modes look random and noisy while real video modes show clear spatial structure, the model's temporal variation is spatially incoherent — a noise problem.
-
----
-
-#### 3D power spectrum plots  
-`results/plots/*_st/3d_spectrum_*.png`
-
-Log-power of the 3D FFT marginalised along temporal, vertical, and horizontal frequency axes.
-
-- **Steep temporal spectrum** (power concentrated at low temporal frequencies) → slow, smooth motion over time.
-- **Flat temporal spectrum** → rapid frame-to-frame changes — more noise-like.
-
-**Research signal:** If the real video temporal spectrum is steeper than the generated one, the model's temporal dynamics run too fast. Increasing AR(1) `alpha` slows temporal dynamics and typically steepens this spectrum.
-
----
-
-### Step 05 — Noise initialization ablation
-
-After running the full ablation, compare `results/metrics/<model>_<noise>.json` across all five noise types.  
-Key metrics ranked by importance for this research:
-
-| Metric | What the ablation reveals |
-|--------|--------------------------|
-| `temporal_ssim_mean` | Which noise type produces the most temporally coherent video |
-| `pearson_mean` | Which type produces smoothest frame-to-frame transitions |
-| `low_freq_energy_ratio` | Which type produces most spatially/temporally coherent content |
-| `spectral_slope` | Which type produces frames closest to the natural 1/f² spectrum |
-| `flow_mag_std` | Which type produces the most consistent (low-variance) motion |
-
-**Expected ordering from most to least temporally coherent:**  
-`ar1 (high alpha) > spatial_lowpass > perlin > gaussian > blue`
-
-This is the hypothesis — the ablation confirms or refutes it.
-
----
-
-### Step 06 — Comparison figure
-
-`results/plots/comparison/comparison_overview.png` shows 12 panels.
-
-**How to read it:**
-
-- **Bar height gap (real vs. generated)** = the "realism gap" for that metric. Smaller gap = better.
-- **Error bars** = standard deviation across videos. Large error bars mean high variance — results may not be reliable with few videos.
-- **ACF overlay** (bottom-left): red curves (generated) should overlap blue curves (real) for a well-calibrated noise type.
-- **Power spectrum overlay** (bottom-right): slopes should be parallel. A vertical shift = brightness/contrast offset (acceptable); a slope difference = spatial frequency imbalance (model issue).
+## Metrics Reference
+
+> For full interpretation guides, reference values, and research signals see [METRICS.md](METRICS.md).
+
+★ = primary metric for this research
+
+### Step 02 — `results/<run_key>/metrics.json`
+
+| Metric | JSON key | Plot file | Signal |
+|--------|----------|-----------|--------|
+| **Temporal SSIM (TCS) ★** | `temporal_ssim.temporal_ssim_mean` | `plots/01_temporal_coherence.png` | higher = more coherent; compare real vs. gen |
+| Frame Pearson r | `frame_correlation.pearson_mean` | `plots/01_temporal_coherence.png` | compare real vs. gen |
+| Frame Spearman ρ | `frame_correlation.spearman_mean` | `plots/01_temporal_coherence.png` | gap vs. Pearson → non-linear artifacts |
+| PSNR (frame-to-frame) | `psnr.psnr_mean` | `plots/01_temporal_coherence.png` | compare real vs. gen |
+| Temporal ACF | `temporal_acf.lag_1` … `lag_10` | `plots/02_motion_dynamics.png` (curves) | shape: slow decay = temporal memory |
+| Optical flow mean | `optical_flow.flow_mag_mean` | `plots/02_motion_dynamics.png` (bars) | compare real vs. gen |
+| Flow std | `optical_flow.flow_mag_std` | `plots/02_motion_dynamics.png` (bars) | lower = more coherent motion field |
+| **Spatial spectral slope ★** | `spatial_power_spectrum.spectral_slope` | `plots/03_spectral.png` | match real-video slope; natural images ≈ −2.0 |
+| Spectral fit R² | `spatial_power_spectrum.spectral_r2` | `plots/03_spectral.png` | lower = artifacts at specific frequencies |
+| 3D low-freq energy | `spatiotemporal_3d.low_freq_energy_ratio` | `plots/03_spectral.png` (bottom-right) | compare real vs. gen |
+| Frame mean / std / skew / kurtosis | `frame_statistics.*` | `plots/04_frame_content.png` | sanity check; compare distributions |
+
+### Step 03 — `results/<run_key>/noise_stats.json`
+
+*Requires `bash scripts/steps/03_noise_inversion.sh`. Adds `plots/05_noise_stats.png` automatically.*
+
+| Metric | JSON key | Signal |
+|--------|----------|--------|
+| KL from N(0,1) | `statistics.kl_from_gaussian` | near 0 = Gaussian; real > gen → structured init needed |
+| KS normality p-value | `statistics.ks_p_value` | p > 0.05 → cannot reject Gaussianity |
+| Noise mean / std / skew / kurtosis | `statistics.*` | ideal Gaussian: 0 / 1 / 0 / 0 |
+| **Cross-frame noise corr ★** | `cross_frame_correlation.cross_frame_corr_mean` | ≈ 0 (gen); real value → set AR(1) α ≈ this |
+| Noise spectral slope | `power_spectrum.spectral_slope_1d` | ≈ 0 = white noise; negative = smooth/correlated noise |
+
+### Step 04 — `results/<run_key>/spatiotemporal/`
+
+| File | Content |
+|------|---------|
+| `pca_spatial_mode_{0,1,2}.png` | Dominant spatial patterns varying over time (heatmaps) |
+| `pca_temporal_0.png` | Amplitude of mode 0 across frames |
+| `3d_spectrum_temporal.png` | Log-power vs temporal frequency |
+| `3d_spectrum_{vertical,horizontal}.png` | Log-power vs spatial frequency axes |
+
+### Plot files at a glance
+
+| File | Panels | Step |
+|------|--------|------|
+| `plots/01_temporal_coherence.png` | TCS · Pearson r · Spearman ρ · PSNR | 02 |
+| `plots/02_motion_dynamics.png` | Flow mean / std / p95 (bars) · ACF curves | 02 |
+| `plots/03_spectral.png` | Power spectrum curves · slope vs −2.0 ref · R² · 3D ratio | 02 |
+| `plots/04_frame_content.png` | Frame mean · std · skewness · kurtosis | 02 |
+| `plots/05_noise_stats.png` | KL · KS p-value · cross-frame corr · noise slope | 03 |
+| `comparison/comparison_overview.png` | 12-panel real-vs-generated (bars + ACF + spectrum + noise dists) | 06 |
+
+### Step 05 — Noise ablation priority
+
+After running `05_noise_init_ablation.sh`, results are in `results/<model>_<noise_type>/metrics.json`.
+
+| Priority | Metric | JSON key |
+|----------|--------|----------|
+| 1 ★ | Temporal SSIM | `temporal_ssim.temporal_ssim_mean` |
+| 2 | Pearson r | `frame_correlation.pearson_mean` |
+| 3 | 3D energy ratio | `spatiotemporal_3d.low_freq_energy_ratio` |
+| 4 | Spectral slope | `spatial_power_spectrum.spectral_slope` |
+| 5 | Flow std | `optical_flow.flow_mag_std` |
+
+Expected ordering: `ar1 (α ≈ 0.8) > spatial_lowpass > perlin > gaussian > blue`
 
 ---
 
@@ -997,51 +761,3 @@ Row 3 — noise inversion panels:
 | `3d_spectrum_vertical.png` | Log-power vs vertical (row) frequency |
 | `3d_spectrum_horizontal.png` | Log-power vs horizontal (column) frequency |
 
----
-
-### Quick lookup — "where is X?"
-
-#### Spectral metrics
-
-| I want to see… | Where to find it | Produced by |
-|----------------|------------------|-------------|
-| Spectral slope number (per video) | `results/real/metrics.json` → `per_video.<name>.spatial_power_spectrum.spectral_slope` | step 02 |
-| Spectral R² (how well it fits 1/f²) | same JSON → `spectral_r2` | step 02 |
-| Radial power spectrum **curves** + slope bars | `results/real/plots/03_spectral.png` | `viz.sh --real` |
-| 3D low-frequency energy ratio | `results/real/plots/03_spectral.png` → bottom-right panel | `viz.sh --real` |
-| Radial spectra real **vs** generated overlaid | `results/modelscope_gaussian/comparison/comparison_overview.png` → row 2, right | step 06 |
-| 3D spectrum (temporal / H / W axes) for real | `results/real/spatiotemporal/3d_spectrum_*.png` | step 04 |
-| 3D spectrum for a generated run | `results/modelscope_gaussian/spatiotemporal/3d_spectrum_*.png` | step 04 |
-
-> **Step 04 must be run** to get the per-video 3D spectrum PNG files.  
-> The 2D radial spectrum (slope + curve) is available after step 02 via `vn-viz`.
-
-#### Correlation & quality metrics
-
-| I want to see… | Where to find it | Produced by |
-|----------------|------------------|-------------|
-| TCS / temporal SSIM per video | `results/real/metrics.json` → `per_video.<name>.temporal_ssim.temporal_ssim_mean` | step 02 |
-| TCS, Pearson, Spearman, PSNR — bar charts | `results/real/plots/01_temporal_coherence.png` | `viz.sh --real` |
-| Temporal ACF curves for all videos | `results/real/plots/02_motion_dynamics.png` → bottom-right panel | `viz.sh --real` |
-| Optical flow mean / std / p95 — bar charts | `results/real/plots/02_motion_dynamics.png` | `viz.sh --real` |
-| Frame pixel statistics (mean, std, skew, kurtosis) | `results/real/plots/04_frame_content.png` | `viz.sh --real` |
-| Same for a generated run | `results/modelscope_gaussian/plots/01–04_*.png` | `viz.sh --gen` |
-| ACF real **vs** generated overlaid | `results/modelscope_gaussian/comparison/comparison_overview.png` → row 2, left | step 06 |
-
-#### Noise inversion
-
-| I want to see… | Where to find it | Produced by |
-|----------------|------------------|-------------|
-| Whether inverted noise is Gaussian (KL, KS) | `results/real/noise_stats.json` → `statistics.kl_from_gaussian` | step 03 |
-| Cross-frame noise correlation number | `results/real/noise_stats.json` → `cross_frame_correlation.cross_frame_corr_mean` | step 03 |
-| All noise stats as bar charts | `results/real/plots/05_noise_stats.png` | `viz.sh --real` (after step 03) |
-| Noise distributions real **vs** generated | `results/modelscope_gaussian/comparison/comparison_overview.png` → row 3, left | step 06 |
-
-#### Other
-
-| I want to see… | Where to find it | Produced by |
-|----------------|------------------|-------------|
-| PCA spatial modes for real videos | `results/real/spatiotemporal/pca_spatial_mode_*.png` | step 04 |
-| All ablation metrics in one place | `results/modelscope_*/metrics.json` | step 05 |
-| Exact generation parameters for a run | `data/generated/modelscope_gaussian/metadata.json` | step 01 |
-| All noise shapes visualised side-by-side | `results/noise_init/noise_comparison.png` | step 05 |

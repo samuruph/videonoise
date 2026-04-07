@@ -5,9 +5,20 @@
 # ============================================================
 
 # --- Paths ---
-data_real: data/real/DAVIS/Videos/480p/
-data_gen:  data/generated/      # parent dir; subdirs are <model>_<noise_type>/
+data_real: data/matched_pairs/deepaction_all/real #data/real/DAVIS/Videos/480p/
+data_gen:  data/matched_pairs/deepaction_all/generated_CogVideoX5B/ #data/generated/      # parent dir; run key (<model>_<noise_type>) appended automatically
 results:   results/
+
+# --- Matched-pairs override ---
+# Set both to switch to a matched dataset without touching anything else.
+# gen_dir replaces the auto-constructed data_gen/<model>_<noise_type>/ path.
+# Leave as null to use the standard data_gen layout.
+#
+# Example — DeepAction CogVideoX5B:
+#   data_real: data/matched_pairs/deepaction_all/real/
+#   gen_dir:   data/matched_pairs/deepaction_all/generated_CogVideoX5B/
+#
+gen_dir: data/matched_pairs/deepaction_all/generated_CogVideoX5B/
 
 # --- Video loading ---
 max_frames: 32

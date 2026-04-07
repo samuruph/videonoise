@@ -21,13 +21,42 @@ config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("scripts/config.y
 with open(config_path) as f:
     c = yaml.safe_load(f)
 
+
+def _data_key(path_str: str) -> str:
+    """
+    Derive a short human-readable key from a data directory path.
+
+    Takes the last two meaningful path components (ignoring the leading 'data'
+    segment) so that, e.g.:
+      data/matched_pairs/deepaction_all/real  →  deepaction_all__real
+      data/real/DAVIS/Videos/480p            →  Videos__480p
+    """
+    parts = [p for p in Path(path_str.rstrip("/")).parts if p not in (".", "")]
+    meaningful = [p for p in parts if p != "data"]
+    if len(meaningful) >= 2:
+        return "__".join(meaningful[-2:])
+    return meaningful[0] if meaningful else "data"
+
+
 resize = c.get("resize", [128, 128])
+
+# Settings fingerprint: embedded in every results folder name so that changing
+# max_frames or resize automatically creates a new folder instead of reusing
+# stale results.
+settings_suffix = f"{c['max_frames']}f_{resize[0]}x{resize[1]}"
+
+# Real-side results key: dataset name + settings
+real_key = _data_key(c["data_real"]) + "__" + settings_suffix
+
 exports = {
-    "DATA_REAL":     c["data_real"],
-    "DATA_GEN":      c["data_gen"],
-    "RESULTS":       c["results"],
-    "MAX_FRAMES":    c["max_frames"],
-    "RESIZE":        f"{resize[0]} {resize[1]}",
+    "DATA_REAL":        c["data_real"],
+    "DATA_GEN":         c["data_gen"],
+    "GEN_DIR_OVERRIDE": c.get("gen_dir") or "",
+    "RESULTS":          c["results"],
+    "REAL_KEY":         real_key,
+    "SETTINGS_SUFFIX":  settings_suffix,
+    "MAX_FRAMES":       c["max_frames"],
+    "RESIZE":           f"{resize[0]} {resize[1]}",
     "MODEL":         c["model"],
     "MODEL_ID":      c.get("model_id") or "",
     "T2I_MODEL_ID":  c.get("t2i_model_id") or "",

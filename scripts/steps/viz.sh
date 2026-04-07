@@ -21,7 +21,12 @@ cd "$REPO_ROOT"
 eval "$(python scripts/yaml_to_env.py scripts/config.yaml)"
 
 MODE="${1:---both}"    # --real | --gen | --both
-GEN_KEY="${MODEL}_${NOISE_TYPE}"
+if [ -n "${GEN_DIR_OVERRIDE:-}" ]; then
+    _GEN_BASE=$(basename "${GEN_DIR_OVERRIDE%/}")
+else
+    _GEN_BASE="${MODEL}_${NOISE_TYPE}"
+fi
+GEN_KEY="${_GEN_BASE}__${SETTINGS_SUFFIX}"
 
 # run_viz <run_dir> <label>
 #   run_dir : results/real/  or  results/modelscope_gaussian/
@@ -55,14 +60,14 @@ echo "================================================================"
 
 case "$MODE" in
     --real)
-        run_viz "${RESULTS}real/"       "real"
+        run_viz "${RESULTS}${REAL_KEY}/" "$REAL_KEY"
         ;;
     --gen)
-        run_viz "${RESULTS}${GEN_KEY}/" "$GEN_KEY"
+        run_viz "${RESULTS}${GEN_KEY}/"  "$GEN_KEY"
         ;;
     --both|*)
-        run_viz "${RESULTS}real/"       "real"
-        run_viz "${RESULTS}${GEN_KEY}/" "$GEN_KEY"
+        run_viz "${RESULTS}${REAL_KEY}/" "$REAL_KEY"
+        run_viz "${RESULTS}${GEN_KEY}/"  "$GEN_KEY"
         ;;
 esac
 
