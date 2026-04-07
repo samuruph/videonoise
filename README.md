@@ -210,16 +210,16 @@ HuggingFace: `Wan-AI/Wan2.1-T2V-14B`
 
 ### Configuration
 
-All settings live in one file: **`scripts/config.yaml`**. Edit it before running any step.
+All settings live in one file: **`scripts/config.yaml`**. Edit it for persistent defaults.
 
 ```yaml
-model: svd          # svd | svd_t2v | modelscope | cogvideox | wan
-noise_type: gaussian # gaussian | ar1 | spatial_lowpass | blue | perlin
-n_videos:   4
-num_frames: 8       # keep ≤ 8 on MPS; up to 25 on CUDA
-num_steps:  20
-data_real:  data/real/DAVIS/JPEGImages/480p/
-active_prompt: "A dog running on a beach"
+model:      hf          # svd | modelscope | cogvideox | wan
+noise_type: gaussian    # gaussian | ar1 | spatial_lowpass | blue | perlin
+n_videos:   10
+num_frames: 32          # keep ≤ 8 on MPS; up to 49 on CUDA
+num_steps:  50
+data_real:  data/matched_pairs/deepaction_all/real
+gen_dir:    data/matched_pairs/deepaction_all/generated_CogVideoX5B/
 ```
 
 ### Run the full pipeline
@@ -232,10 +232,12 @@ bash scripts/run_all.sh
 
 ### Run individual steps
 
-Each step reads config from `scripts/config.yaml` and can be run independently:
+Each step is a Python script that reads from `config.yaml`. Every step also
+accepts CLI overrides for any config param — edit the values inside the `.sh`
+wrapper or run the Python script directly:
 
 ```bash
-bash scripts/steps/00_download_data.sh        # download / generate real reference videos
+bash scripts/steps/00_download_data.sh        # download real reference videos
 bash scripts/steps/01_generate_videos.sh      # generate with chosen model + noise  [GPU]
 # — OR, if you have no GPU / want pre-existing AI outputs: —
 bash scripts/steps/01b_download_generated.sh  # download pre-generated AI videos    [no GPU]
@@ -246,6 +248,26 @@ bash scripts/steps/04_spatiotemporal.sh       # PCA + 3D power spectrum
 bash scripts/steps/05_noise_init_ablation.sh  # sweep all 5 noise types
 bash scripts/steps/06_compare_results.sh      # summary table + comparison figure
 ```
+
+### Overriding settings per run
+
+Every step accepts CLI overrides for any config param. You can either edit the
+values directly inside the `.sh` file, or call the Python script with flags:
+
+```bash
+# Run step 02 with lower resolution for a quick check
+python scripts/steps/compute_metrics.py --max_frames 8 --resize 128 128
+
+# Generate with a different model without touching config.yaml
+python scripts/steps/generate_videos.py --model modelscope --noise_type ar1 --n_videos 5
+
+# Visualise only the real dataset
+python scripts/steps/viz.py --mode real
+```
+
+Any param not passed on the command line falls back to `scripts/config.yaml`.
+Adding a new config param only requires changing `config.yaml` and
+[`scripts/config_loader.py`](scripts/config_loader.py) — no other file needs to change.
 
 ### Step 01b — Download pre-generated videos (no GPU required)
 
@@ -316,27 +338,49 @@ vn-viz results/metrics/real.json   # same, directly with label
 
 ## Scripts Reference
 
-| Script | Console cmd | Purpose |
-|--------|-------------|---------|
-| `download_data.py` | — | Download DAVIS or create synthetic videos |
-| `generate_videos.py` | `vn-generate` | Generate videos with any model + custom noise |
-| `compute_metrics.py` | `vn-metrics` | Correlation, spectral, quality metrics → JSON |
-| `noise_inversion.py` | `vn-inversion` | Invert noise + statistical characterisation → JSON |
-| `noise_init.py` | `vn-noise-init` | Generate & compare all noise types |
-| `spatiotemporal_analysis.py` | `vn-stanalysis` | PCA, UMAP, 3D FFT → plots |
-| `compare_results.py` | `vn-compare` | Summary table + comparison figure (needs both datasets) |
-| `viz_metrics.py` | `vn-viz` | Visualise a single metrics JSON (one dataset) |
+### Step scripts — `scripts/steps/`
 
-### Common flags
+All step scripts read defaults from `config.yaml` and accept CLI overrides for
+any config param. Use `--help` to see all available flags.
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--model` | `svd`, `svd_t2v`, `modelscope`, `cogvideox`, `wan` | `svd` |
-| `--noise_type` | `gaussian`, `ar1`, `spatial_lowpass`, `blue`, `perlin` | `gaussian` |
-| `--input` | Folder of videos or JPEG-sequence subfolders | — |
-| `--output` | Output path (JSON or folder) | — |
-| `--max_frames` | Max frames to read per video | 64 |
-| `--resize W H` | Resize frames before processing | original size |
+| Step script | Bash wrapper | Purpose |
+|-------------|--------------|---------|
+| `download_data.py` | `00_download_data.sh` | Download real reference videos |
+| `generate_videos.py` | `01_generate_videos.sh` | Generate videos (model + custom noise) [GPU] |
+| `compute_metrics.py` | `02_compute_metrics.sh` | Correlation, spectral, quality metrics → JSON |
+| `noise_inversion.py` | `03_noise_inversion.sh` | Noise inversion + statistical characterisation → JSON |
+| `spatiotemporal.py` | `04_spatiotemporal.sh` | PCA, UMAP, 3D FFT → plots |
+| `noise_ablation.py` | `05_noise_init_ablation.sh` | Sweep all 5 noise types |
+| `compare_results.py` | `06_compare_results.sh` | Summary table + comparison figure |
+| `viz.py` | `viz.sh` | Visualise a single run's metrics (`--mode real\|gen\|both`) |
+
+### Low-level CLI entry points — `vn-*`
+
+These are called by the step scripts internally; you can also use them directly.
+
+| Console command | Module | Purpose |
+|-----------------|--------|---------|
+| `vn-generate` | `videonoise.scripts.generate_videos` | Generate videos |
+| `vn-metrics` | `videonoise.scripts.compute_metrics` | Compute metrics |
+| `vn-inversion` | `videonoise.scripts.noise_inversion` | Noise inversion |
+| `vn-stanalysis` | `videonoise.scripts.spatiotemporal_analysis` | ST analysis |
+| `vn-compare` | `videonoise.scripts.compare_results` | Comparison figure |
+| `vn-viz` | `videonoise.scripts.viz_metrics` | Single-run visualisation |
+| `vn-noise-init` | `videonoise.scripts.noise_init` | Noise shape comparison |
+
+### Common CLI flags (all step scripts)
+
+| Flag | Description |
+|------|-------------|
+| `--config` | Path to config YAML (default: `scripts/config.yaml`) |
+| `--max_frames N` | Max frames to load per video |
+| `--resize W H` | Resize frames before processing |
+| `--model` | `svd` \| `modelscope` \| `cogvideox` \| `wan` |
+| `--noise_type` | `gaussian` \| `ar1` \| `spatial_lowpass` \| `blue` \| `perlin` |
+| `--n_videos N` | Number of videos |
+| `--num_frames N` | Frames per video |
+| `--data_real` | Real videos directory |
+| `--gen_dir` | Override: exact generated videos directory |
 
 ---
 
@@ -571,83 +615,80 @@ The notebook covers:
 
 ## Results Layout
 
-### Naming convention — `<run_key>`
+### Naming convention
 
-Everything is organized around a **run key**: `<model>_<noise_type>`.
-
-```
-modelscope_gaussian   svd_ar1   wan_perlin   cogvideox_blue   …
-```
-
-Both generated data and all results use the same key, so you can always match them:
+Results folders are named automatically from the **data path** and **processing settings**
+so runs with different datasets or resolutions never collide:
 
 ```
-data/generated/modelscope_gaussian/   ←→   results/modelscope_gaussian/
+results/<dataset_path>__<frames>f_<W>x<H>/      ← real videos
+results/<gen_folder>__<frames>f_<W>x<H>/        ← generated videos
 ```
 
-Real reference videos always use the key `real`.
+Examples with the current config (`max_frames: 32`, `resize: [512, 768]`):
+
+```
+results/deepaction_all__real__32f_512x768/
+results/generated_CogVideoX5B__32f_512x768/
+```
+
+Changing any of `data_real`, `max_frames`, or `resize` automatically creates a
+new folder — stale results from a previous run are never silently reused.
+
+For the noise ablation (step 05), each noise type gets its own folder:
+
+```
+results/hf_gaussian__32f_512x768/
+results/hf_ar1__32f_512x768/
+results/hf_perlin__32f_512x768/
+…
+```
 
 ---
 
 ### Full directory tree after running all steps
 
+Example with `data/matched_pairs/deepaction_all/`, `max_frames: 32`, `resize: [512, 768]`:
+
 ```
 data/
-├── real/
-│   └── DAVIS/JPEGImages/480p/
-│       ├── bear/               # JPEG frame sequences (DAVIS layout)
-│       ├── blackswan/
-│       └── ...
-└── generated/
-    ├── modelscope_gaussian/    # step 01 — one folder per run
+├── matched_pairs/
+│   └── deepaction_all/
+│       ├── real/                    # real Pexels videos
+│       └── generated_CogVideoX5B/   # matched AI-generated videos
+└── generated/                       # step 01 outputs (when generating locally)
+    ├── hf_gaussian/
     │   ├── video_000_seed42.mp4
-    │   ├── video_001_seed43.mp4
-    │   └── metadata.json       # model, noise, prompt, all generation params
-    ├── modelscope_ar1/
-    │   └── ...
-    └── svd_gaussian/
-        └── ...
+    │   └── metadata.json            # model, noise, prompt, all generation params
+    ├── hf_ar1/
+    └── ...
 
 results/
-├── real/                       # all results for real reference videos
-│   ├── metrics.json            # step 02 — correlation, spectral, quality metrics
-│   ├── noise_stats.json        # step 03 — inverted noise statistics (optional)
-│   ├── plots/                  # viz step — 5 themed PNG panels
+├── deepaction_all__real__32f_512x768/          # real video analysis
+│   ├── metrics.json                            # step 02
+│   ├── noise_stats.json                        # step 03 (optional)
+│   ├── plots/                                  # viz step
 │   │   ├── 01_temporal_coherence.png
 │   │   ├── 02_motion_dynamics.png
 │   │   ├── 03_spectral.png
 │   │   ├── 04_frame_content.png
-│   │   └── 05_noise_stats.png  #   only after step 03
-│   └── spatiotemporal/         # step 04 — PCA modes + 3D spectra
+│   │   └── 05_noise_stats.png                  # only after step 03
+│   └── spatiotemporal/                         # step 04
 │       ├── pca_spatial_mode_0.png
 │       ├── pca_temporal_0.png
 │       └── 3d_spectrum_*.png
 │
-├── modelscope_gaussian/        # all results for this run — mirrors data/generated/
-│   ├── metrics.json            # step 02
-│   ├── noise_stats.json        # step 03 (optional)
-│   ├── plots/                  # viz step
-│   │   ├── 01_temporal_coherence.png
-│   │   ├── 02_motion_dynamics.png
-│   │   ├── 03_spectral.png
-│   │   ├── 04_frame_content.png
-│   │   └── 05_noise_stats.png
-│   ├── spatiotemporal/         # step 04
-│   │   └── ...
-│   └── comparison/             # step 06 — real vs this run
+├── generated_CogVideoX5B__32f_512x768/         # generated video analysis
+│   ├── metrics.json
+│   ├── noise_stats.json
+│   ├── plots/
+│   ├── spatiotemporal/
+│   └── comparison/                             # step 06
 │       └── comparison_overview.png
 │
-├── modelscope_ar1/             # same structure for every other run
-│   └── ...
-├── svd_gaussian/
-│   └── ...
-│
-└── noise_init/                 # step 05 — global noise shape comparison (no model)
-    ├── noise_init_stats.json
+└── noise_init/                                 # step 05 — noise shape comparison
     └── noise_comparison.png
 ```
-
-**The rule:** for any run key `K`, find everything in one place — `data/generated/K/` for the videos, `results/K/` for all analysis outputs.
 
 ---
 

@@ -153,6 +153,47 @@ def umap_embedding(
 
 
 # ---------------------------------------------------------------------------
+# Programmatic folder API
+# ---------------------------------------------------------------------------
+
+def run_spatiotemporal_folder(
+    input_path: str,
+    output_path: str,
+    max_frames: int = 32,
+    resize: tuple = (128, 128),
+    n_pca_components: int = 8,
+    use_pixel_pca: bool = True,
+    use_umap: bool = False,
+) -> None:
+    """Run spatio-temporal analysis on all videos in *input_path*."""
+    from videonoise.io import load_video_folder
+    from videonoise.utils import save_json
+
+    Path(output_path).mkdir(parents=True, exist_ok=True)
+    videos = load_video_folder(input_path, max_frames=max_frames, resize=tuple(resize))
+    if not videos:
+        print(f"No .mp4 files found in {input_path}")
+        return
+
+    all_pca, all_freq = {}, {}
+    for name, video in videos:
+        print(f"Processing {name} {tuple(video.shape)}")
+        all_freq[name] = frequency_analysis(video)
+        plot_3d_spectrum(video, output_path, name)
+        if use_pixel_pca:
+            res = pixel_pca(video, n_components=n_pca_components)
+            plot_pca_maps(res, output_path, name)
+            plot_pca_temporal(res, output_path, name)
+            all_pca[name] = {k: res[k] for k in ("coords", "explained_variance_ratio")}
+
+    if use_umap and all_pca:
+        umap_embedding(all_pca, output_path, n_components=n_pca_components)
+
+    save_json({"frequency_analysis": all_freq}, str(Path(output_path) / "frequency_stats.json"))
+    print(f"Done → {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Console-script entry point  (vn-stanalysis)
 # ---------------------------------------------------------------------------
 

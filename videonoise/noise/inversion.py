@@ -213,6 +213,35 @@ def analyze_video_noise(
 
 
 # ---------------------------------------------------------------------------
+# Programmatic folder API
+# ---------------------------------------------------------------------------
+
+def run_noise_inversion_folder(
+    input_path: str,
+    output_path: str,
+    max_frames: int = 32,
+    resize: Optional[tuple] = None,
+    model_id: Optional[str] = None,
+) -> None:
+    """Run noise inversion on all videos in *input_path* and save results to *output_path*."""
+    from videonoise.io import load_video_folder
+    from videonoise.utils import save_json
+
+    videos = load_video_folder(input_path, max_frames=max_frames, resize=resize)
+    if not videos:
+        print(f"No .mp4 files found in {input_path}")
+        return
+
+    per_video = {}
+    for name, video in videos:
+        print(f"Processing {name} {tuple(video.shape)}")
+        per_video[name] = analyze_video_noise(video, name, model_id=model_id)
+
+    save_json({"per_video": per_video}, output_path)
+    print(f"Saved → {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Console-script entry point  (vn-inversion)
 # ---------------------------------------------------------------------------
 

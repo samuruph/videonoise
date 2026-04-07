@@ -1,59 +1,10 @@
 #!/usr/bin/env bash
-# Step 02 — Compute correlation, spectral, and quality metrics.
-#
-# Reads  : $DATA_REAL  and  $DATA_GEN/<model>_<noise>/  (or GEN_DIR_OVERRIDE)
-# Writes : results/<real_dataset>__<frames>f_<w>x<h>/metrics.json
-#          results/<gen_dataset>__<frames>f_<w>x<h>/metrics.json
-#
-# Folder names are auto-derived from data paths + settings so results are
-# never confused across different datasets or resolutions.
-#
-# Run standalone:
-#   bash scripts/steps/02_compute_metrics.sh
-# ---------------------------------------------------------------------------
+# Step 02 — Compute video metrics (correlation, spectral, quality).
+# Edit params below to change settings for this run.
+# Any param not listed here is read from scripts/config.yaml.
 set -euo pipefail
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$REPO_ROOT"
-eval "$(python scripts/yaml_to_env.py scripts/config.yaml)"
+cd "$(cd "$(dirname "$0")/../.." && pwd)"
 
-if [ -n "${GEN_DIR_OVERRIDE:-}" ]; then
-    GEN_DIR="${GEN_DIR_OVERRIDE%/}/"
-    _GEN_BASE=$(basename "${GEN_DIR_OVERRIDE%/}")
-else
-    _GEN_BASE="${MODEL}_${NOISE_TYPE}"
-    GEN_DIR="${DATA_GEN}${_GEN_BASE}/"
-fi
-GEN_KEY="${_GEN_BASE}__${SETTINGS_SUFFIX}"
-REAL_OUT="${RESULTS}${REAL_KEY}/"
-GEN_OUT="${RESULTS}${GEN_KEY}/"
-mkdir -p "$REAL_OUT" "$GEN_OUT"
-
-echo "================================================================"
-echo "  Step 02 — Compute metrics"
-echo "  Real      : $DATA_REAL  →  ${REAL_OUT}metrics.json"
-echo "  Generated : $GEN_DIR  →  ${GEN_OUT}metrics.json"
-echo "================================================================"
-
-echo "  [1/2] Real videos..."
-if [ -f "${REAL_OUT}metrics.json" ]; then
-    echo "  [skip] ${REAL_OUT}metrics.json already exists"
-else
-    python -m videonoise.scripts.compute_metrics \
-        --input      "$DATA_REAL" \
-        --output     "${REAL_OUT}metrics.json" \
-        --max_frames "$MAX_FRAMES" \
-        --resize     $RESIZE
-fi
-
-echo "  [2/2] Generated videos..."
-if [ -f "${GEN_OUT}metrics.json" ]; then
-    echo "  [skip] ${GEN_OUT}metrics.json already exists"
-else
-    python -m videonoise.scripts.compute_metrics \
-        --input      "$GEN_DIR" \
-        --output     "${GEN_OUT}metrics.json" \
-        --max_frames "$MAX_FRAMES" \
-        --resize     $RESIZE
-fi
-
-echo "  Done. Metrics saved to ${RESULTS}<run_key>/metrics.json"
+python scripts/steps/compute_metrics.py \
+    --max_frames 32  \
+    --resize     512 768
