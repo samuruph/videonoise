@@ -19,6 +19,7 @@ dependencies = [
     "tqdm",
     "imageio",
     "imageio-ffmpeg",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
@@ -28,13 +29,14 @@ dev       = ["jupyter", "ipykernel", "pytest"]
 
 [project.scripts]
 vn-download   = "videonoise.scripts.download_data:main"
-vn-metrics    = "videonoise.metrics:_cli"
-vn-inversion  = "videonoise.noise.inversion:_cli"
+vn-generate   = "videonoise.scripts.generate_videos:main"
+vn-metrics    = "videonoise.scripts.compute_metrics:main"
+vn-inversion  = "videonoise.scripts.noise_inversion:main"
+vn-stanalysis = "videonoise.scripts.spatiotemporal_analysis:main"
+vn-compare    = "videonoise.scripts.compare_results:main"
+vn-viz        = "videonoise.scripts.viz_metrics:main"
+vn-ablation   = "videonoise.scripts.noise_ablation:main"
 vn-noise-init = "videonoise.noise.generators:_cli"
-vn-stanalysis = "videonoise.analysis.spatiotemporal:_cli"
-vn-compare    = "videonoise.analysis.plots:_cli"
-vn-viz        = "videonoise.analysis.plots:_cli_viz"
-vn-generate   = "videonoise.diffusion.pipelines:_cli"
 
 [tool.setuptools.packages.find]
 where = ["."]

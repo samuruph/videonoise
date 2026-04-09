@@ -2,28 +2,23 @@
 """
 Print bash export statements from scripts/config.yaml.
 
-Only needed for custom shell scripts that bypass the Python step runners.
-The step scripts (scripts/steps/*.py) import config_loader directly.
+Only needed for custom shell scripts. The step scripts use
+videonoise.config_loader directly via python -m videonoise.scripts.*.
 
 Usage (inside a bash script):
     eval "$(python scripts/yaml_to_env.py)"
     eval "$(python scripts/yaml_to_env.py path/to/config.yaml)"
 """
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# Minimal argparse so config_loader's build_parser() doesn't choke on no args
 import argparse
+import sys
+
 _p = argparse.ArgumentParser()
 _p.add_argument("config_pos", nargs="?", default="scripts/config.yaml")
 _pos = _p.parse_args()
 
-# Patch sys.argv so config_loader reads the positional path
 sys.argv = ["yaml_to_env.py", "--config", _pos.config_pos]
 
-from scripts.config_loader import load_config
+from videonoise.config_loader import load_config
 cfg = load_config()
 
 exports = {

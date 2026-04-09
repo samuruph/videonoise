@@ -1,11 +1,48 @@
 """
-CLI: compute all video metrics on a folder of .mp4 files.
+Step 02 — Compute video metrics for real and generated videos.
 
-Usage:
-    python -m videonoise.scripts.compute_metrics --input data/real/ --output results/metrics/real.json
-    python -m videonoise.scripts.compute_metrics --input data/generated/ --output results/metrics/generated.json
+Reads   : data_real  and  gen_dir  (from config)
+Writes  : results/<real_key>/metrics.json
+          results/<gen_key>/metrics.json
+
+All settings come from scripts/config.yaml. Override any value from the CLI:
+    python -m videonoise.scripts.compute_metrics --max_frames 16 --resize 256 256
 """
-from videonoise.metrics import _cli
+from pathlib import Path
+
+from videonoise.config_loader import load_config
+from videonoise.metrics import compute_metrics_for_folder
+
+
+def main() -> None:
+    cfg = load_config()
+
+    real_json = Path(cfg.real_out) / "metrics.json"
+    gen_json  = Path(cfg.gen_out)  / "metrics.json"
+
+    print("=" * 64)
+    print("  Step 02 — Compute metrics")
+    print(f"  Real      : {cfg.data_real}")
+    print(f"              → {real_json}")
+    print(f"  Generated : {cfg.gen_dir_resolved}")
+    print(f"              → {gen_json}")
+    print("=" * 64)
+
+    Path(cfg.real_out).mkdir(parents=True, exist_ok=True)
+    Path(cfg.gen_out).mkdir(parents=True, exist_ok=True)
+
+    print("\n  [1/2] Real videos...")
+    if real_json.exists():
+        print(f"  [skip] {real_json} already exists")
+    else:
+        compute_metrics_for_folder(cfg.data_real, str(real_json), cfg.max_frames, cfg.resize)
+
+    print("\n  [2/2] Generated videos...")
+    if gen_json.exists():
+        print(f"  [skip] {gen_json} already exists")
+    else:
+        compute_metrics_for_folder(cfg.gen_dir_resolved, str(gen_json), cfg.max_frames, cfg.resize)
+
 
 if __name__ == "__main__":
-    _cli()
+    main()

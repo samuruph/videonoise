@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Intermediate visualisation — works after step 02 alone.
-# --mode  real | gen | both   (default: both)
+# Visualise metrics — works after step 02 alone.
+# --mode  real | gen | both
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/../.." && pwd)"
 
-python scripts/steps/viz.py \
+python -m videonoise.scripts.viz_metrics \
     --mode both
