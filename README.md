@@ -386,71 +386,42 @@ These are called by the step scripts internally; you can also use them directly.
 
 ## Metrics Reference
 
-> For full interpretation guides, reference values, and research signals see [METRICS.md](METRICS.md).
+> Full details — interpretation, research signals, proposed additional analyses, and connection to a learnable prior — are in [METRICS.md](METRICS.md).
 
-★ = primary metric for this research
+★ = primary metric  ·  all metrics compare real vs. generated; the gap is the signal, not an absolute value.
 
-### Step 02 — `results/<run_key>/metrics.json`
+### Step 02 outputs — `results/<run_key>/metrics.json`
 
-| Metric | JSON key | Plot file | Signal |
-|--------|----------|-----------|--------|
-| **Temporal SSIM (TCS) ★** | `temporal_ssim.temporal_ssim_mean` | `plots/01_temporal_coherence.png` | higher = more coherent; compare real vs. gen |
-| Frame Pearson r | `frame_correlation.pearson_mean` | `plots/01_temporal_coherence.png` | compare real vs. gen |
-| Frame Spearman ρ | `frame_correlation.spearman_mean` | `plots/01_temporal_coherence.png` | gap vs. Pearson → non-linear artifacts |
-| PSNR (frame-to-frame) | `psnr.psnr_mean` | `plots/01_temporal_coherence.png` | compare real vs. gen |
-| Temporal ACF | `temporal_acf.lag_1` … `lag_10` | `plots/02_motion_dynamics.png` (curves) | shape: slow decay = temporal memory |
-| Optical flow mean | `optical_flow.flow_mag_mean` | `plots/02_motion_dynamics.png` (bars) | compare real vs. gen |
-| Flow std | `optical_flow.flow_mag_std` | `plots/02_motion_dynamics.png` (bars) | lower = more coherent motion field |
-| **Spatial spectral slope ★** | `spatial_power_spectrum.spectral_slope` | `plots/03_spectral.png` | match real-video slope; natural images ≈ −2.0 |
-| Spectral fit R² | `spatial_power_spectrum.spectral_r2` | `plots/03_spectral.png` | lower = artifacts at specific frequencies |
-| 3D low-freq energy | `spatiotemporal_3d.low_freq_energy_ratio` | `plots/03_spectral.png` (bottom-right) | compare real vs. gen |
-| Frame mean / std / skew / kurtosis | `frame_statistics.*` | `plots/04_frame_content.png` | sanity check; compare distributions |
+| Metric ★ | JSON key | Plot |
+|----------|----------|------|
+| **Temporal SSIM** ★ | `temporal_ssim.temporal_ssim_mean` | `01_temporal_coherence.png` |
+| Frame Pearson r | `frame_correlation.pearson_mean` | `01_temporal_coherence.png` |
+| Frame Spearman ρ | `frame_correlation.spearman_mean` | `01_temporal_coherence.png` |
+| PSNR (frame-to-frame) | `psnr.psnr_mean` | `01_temporal_coherence.png` |
+| Temporal ACF (lags 1–10) | `temporal_acf.lag_k` | `02_motion_dynamics.png` |
+| Flow magnitude (mean, std, p95) | `optical_flow.flow_mag_*` | `02_motion_dynamics.png` |
+| **Spatial spectral slope** ★ | `spatial_power_spectrum.spectral_slope` | `03_spectral.png` |
+| Spectral R² | `spatial_power_spectrum.spectral_r2` | `03_spectral.png` |
+| 3D low-freq energy ratio | `spatiotemporal_3d.low_freq_energy_ratio` | `03_spectral.png` |
+| Frame pixel statistics | `frame_statistics.*` | `04_frame_content.png` |
 
-### Step 03 — `results/<run_key>/noise_stats.json`
+### Step 03 outputs — `results/<run_key>/noise_stats.json`
 
-*Requires `bash scripts/steps/03_noise_inversion.sh`. Adds `plots/05_noise_stats.png` automatically.*
+| Metric ★ | JSON key | Plot |
+|----------|----------|------|
+| KL from N(0,1) | `statistics.kl_from_gaussian` | `05_noise_stats.png` |
+| KS normality p-value | `statistics.ks_p_value` | `05_noise_stats.png` |
+| Noise moments (mean/std/skew/kurt) | `statistics.*` | `05_noise_stats.png` |
+| **Cross-frame noise correlation** ★ | `cross_frame_correlation.cross_frame_corr_mean` | `05_noise_stats.png` |
+| Noise spectral slope | `power_spectrum.spectral_slope_1d` | `05_noise_stats.png` |
 
-| Metric | JSON key | Signal |
-|--------|----------|--------|
-| KL from N(0,1) | `statistics.kl_from_gaussian` | near 0 = Gaussian; real > gen → structured init needed |
-| KS normality p-value | `statistics.ks_p_value` | p > 0.05 → cannot reject Gaussianity |
-| Noise mean / std / skew / kurtosis | `statistics.*` | ideal Gaussian: 0 / 1 / 0 / 0 |
-| **Cross-frame noise corr ★** | `cross_frame_correlation.cross_frame_corr_mean` | ≈ 0 (gen); real value → set AR(1) α ≈ this |
-| Noise spectral slope | `power_spectrum.spectral_slope_1d` | ≈ 0 = white noise; negative = smooth/correlated noise |
+### Step 04 outputs — `results/<run_key>/spatiotemporal/`
 
-### Step 04 — `results/<run_key>/spatiotemporal/`
-
-| File | Content |
-|------|---------|
-| `pca_spatial_mode_{0,1,2}.png` | Dominant spatial patterns varying over time (heatmaps) |
+| File | What it shows |
+|------|---------------|
+| `pca_spatial_mode_{0,1,2}.png` | Dominant spatial patterns varying over time |
 | `pca_temporal_0.png` | Amplitude of mode 0 across frames |
-| `3d_spectrum_temporal.png` | Log-power vs temporal frequency |
-| `3d_spectrum_{vertical,horizontal}.png` | Log-power vs spatial frequency axes |
-
-### Plot files at a glance
-
-| File | Panels | Step |
-|------|--------|------|
-| `plots/01_temporal_coherence.png` | TCS · Pearson r · Spearman ρ · PSNR | 02 |
-| `plots/02_motion_dynamics.png` | Flow mean / std / p95 (bars) · ACF curves | 02 |
-| `plots/03_spectral.png` | Power spectrum curves · slope vs −2.0 ref · R² · 3D ratio | 02 |
-| `plots/04_frame_content.png` | Frame mean · std · skewness · kurtosis | 02 |
-| `plots/05_noise_stats.png` | KL · KS p-value · cross-frame corr · noise slope | 03 |
-| `comparison/comparison_overview.png` | 12-panel real-vs-generated (bars + ACF + spectrum + noise dists) | 06 |
-
-### Step 05 — Noise ablation priority
-
-After running `05_noise_init_ablation.sh`, results are in `results/<model>_<noise_type>/metrics.json`.
-
-| Priority | Metric | JSON key |
-|----------|--------|----------|
-| 1 ★ | Temporal SSIM | `temporal_ssim.temporal_ssim_mean` |
-| 2 | Pearson r | `frame_correlation.pearson_mean` |
-| 3 | 3D energy ratio | `spatiotemporal_3d.low_freq_energy_ratio` |
-| 4 | Spectral slope | `spatial_power_spectrum.spectral_slope` |
-| 5 | Flow std | `optical_flow.flow_mag_std` |
-
-Expected ordering: `ar1 (α ≈ 0.8) > spatial_lowpass > perlin > gaussian > blue`
+| `*_3d_spectrum.png` | Log-power vs temporal / spatial frequency axes |
 
 ---
 
