@@ -4,6 +4,7 @@ High-level orchestrator: compute all metrics for a single video.
 import argparse
 
 import torch
+from tqdm import tqdm
 
 from videonoise.metrics.correlation import (
     frame_correlation,
@@ -87,7 +88,7 @@ def _cli() -> None:
         return
 
     per_video = {}
-    for name, video in videos:
+    for name, video in tqdm(videos, desc="Computing metrics", unit="video"):
         print(f"Processing {name} {tuple(video.shape)}")
         per_video[name] = compute_all_metrics(video, name)
 
@@ -125,7 +126,7 @@ def compute_metrics_for_folder(input_path: str, output_path: str, max_frames: in
         return
 
     per_video = {}
-    for name, video in videos:
+    for name, video in tqdm(videos, desc="Computing metrics", unit="video"):
         print(f"Processing {name} {tuple(video.shape)}")
         per_video[name] = compute_all_metrics(video, name)
 

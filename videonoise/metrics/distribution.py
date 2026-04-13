@@ -12,6 +12,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -118,10 +119,10 @@ def compute_lpips_between_sets(
     real_vids = _load_video_tensors(real_folder, max_frames, resize, device)
     gen_vids  = _load_video_tensors(gen_folder,  max_frames, resize, device)
 
-    def _temporal_lpips(vids: list[torch.Tensor]) -> float:
+    def _temporal_lpips(vids: list[torch.Tensor], label: str) -> float:
         vals = []
         with torch.no_grad():
-            for v in vids:
+            for v in tqdm(vids, desc=f"LPIPS temporal {label}", unit="video", leave=False):
                 frames = v.float() * 2 - 1
                 if frames.shape[1] == 1:
                     frames = frames.expand(-1, 3, -1, -1)
@@ -131,8 +132,8 @@ def compute_lpips_between_sets(
         return float(np.mean(vals)) if vals else float("nan")
 
     result = {
-        "lpips_temporal_real": _temporal_lpips(real_vids),
-        "lpips_temporal_gen":  _temporal_lpips(gen_vids),
+        "lpips_temporal_real": _temporal_lpips(real_vids, "real"),
+        "lpips_temporal_gen":  _temporal_lpips(gen_vids, "gen"),
     }
 
     # Cross-set: only if counts match (matched pairs scenario)
@@ -143,7 +144,8 @@ def compute_lpips_between_sets(
             min(g.shape[0] for g in gen_vids),
         )
         with torch.no_grad():
-            for rv, gv in zip(real_vids, gen_vids):
+            for rv, gv in tqdm(zip(real_vids, gen_vids), desc="LPIPS real↔gen",
+                                total=len(real_vids), unit="pair", leave=False):
                 rf = rv[:min_T].float() * 2 - 1
                 gf = gv[:min_T].float() * 2 - 1
                 if rf.shape[1] == 1:
@@ -240,7 +242,7 @@ def compute_clip_score(
 
     scores = []
     with torch.no_grad():
-        for stem, video in videos:
+        for stem, video in tqdm(videos, desc="CLIP score", unit="video"):
             prompt = prompts.get(stem) or prompts.get(Path(stem).stem)
             if not prompt:
                 continue

@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 import torch
 from scipy import stats
+from tqdm import tqdm
 
 from videonoise.utils import get_device
 
@@ -212,7 +213,7 @@ def ddim_inversion_svd(
         latents = torch.cat([
             pipe.vae.encode(frames_scaled[t:t + 1]).latent_dist.sample()
             * pipe.vae.config.scaling_factor
-            for t in range(T)
+            for t in tqdm(range(T), desc="VAE encode", unit="frame", leave=False)
         ])  # (T, 4, h, w)
 
     scheduler = pipe.scheduler
@@ -220,7 +221,7 @@ def ddim_inversion_svd(
     timesteps = scheduler.timesteps.flip(0)
 
     x = latents.unsqueeze(0)
-    for i, t in enumerate(timesteps):
+    for i, t in enumerate(tqdm(timesteps, desc="DDIM inversion", unit="step", leave=False)):
         alpha_prod = scheduler.alphas_cumprod[t]
         beta       = 1 - alpha_prod
         x = (alpha_prod ** 0.5) * latents.unsqueeze(0) + (beta ** 0.5) * torch.zeros_like(x)
@@ -284,7 +285,7 @@ def run_noise_inversion_folder(
         return
 
     per_video = {}
-    for name, video in videos:
+    for name, video in tqdm(videos, desc="Noise inversion", unit="video"):
         print(f"Processing {name} {tuple(video.shape)}")
         per_video[name] = analyze_video_noise(video, name, model_id=model_id)
 
@@ -316,7 +317,7 @@ def _cli() -> None:
         return
 
     per_video = {}
-    for name, video in videos:
+    for name, video in tqdm(videos, desc="Noise inversion", unit="video"):
         print(f"Processing {name} {tuple(video.shape)}")
         per_video[name] = analyze_video_noise(video, name, model_id=args.model)
 

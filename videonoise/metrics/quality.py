@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy import stats
+from tqdm import tqdm
 from skimage.metrics import structural_similarity as ski_ssim
 from skimage.transform import rescale
 
@@ -143,7 +144,7 @@ def lpips_temporal(video: torch.Tensor, net: str = "alex") -> dict:
     T = frames.shape[0]
     vals = []
     with torch.no_grad():
-        for t in range(T - 1):
+        for t in tqdm(range(T - 1), desc="LPIPS", unit="pair", leave=False):
             d = loss_fn(frames[t:t + 1], frames[t + 1:t + 2]).item()
             vals.append(float(d))
     return {

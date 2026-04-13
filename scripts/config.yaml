@@ -6,7 +6,7 @@
 
 # --- Paths ---
 data_real: data/matched_pairs/deepaction_all/real #data/real/DAVIS/Videos/480p/
-data_gen:  data/matched_pairs/deepaction_all/generated_CogVideoX5B/ #data/generated/      # parent dir; run key (<model>_<noise_type>) appended automatically
+data_gen:  data/matched_pairs/deepaction_all/generated_RunawayML/ #data/generated/      # parent dir; run key (<model>_<noise_type>) appended automatically
 results:   results/
 
 # --- Matched-pairs override ---
@@ -18,11 +18,11 @@ results:   results/
 #   data_real: data/matched_pairs/deepaction_all/real/
 #   gen_dir:   data/matched_pairs/deepaction_all/generated_CogVideoX5B/
 #
-gen_dir: data/matched_pairs/deepaction_all/generated_CogVideoX5B/
+gen_dir: data/matched_pairs/deepaction_all/generated_RunawayML/
 
 # --- Video loading ---
-max_frames: 32
-resize: [512,768] #[128, 128]      # [W, H]
+max_frames: 64 #32
+resize: [1280,768] #[128, 128]      # [W, H]
 
 # --- Model ---
 # svd         ~14 GB  image-to-video  (random conditioning image, fastest)
@@ -36,7 +36,7 @@ t2i_model_id: null      # leave null to use sdxl-base-1.0  [svd_t2v only]
 
 # --- Noise initialization ---
 # gaussian | ar1 | spatial_lowpass | blue | perlin
-noise_type: wan     # combined with model → run key "hf_wan"
+noise_type: gaussian    # combined with model → run key "hf_wan"
 alpha: 0.8              # AR(1) temporal coefficient  [ar1]
 sigma: 2.0              # Spatial low-pass sigma      [spatial_lowpass]
 
@@ -44,7 +44,7 @@ sigma: 2.0              # Spatial low-pass sigma      [spatial_lowpass]
 # MPS (Apple Silicon): keep num_frames <= 8 and num_steps <= 20 to avoid OOM.
 # CUDA: num_frames up to 25, num_steps up to 50 is fine.
 n_videos:   100
-num_frames: 32
+num_frames: 64
 num_steps:  50 #20
 seed:       42
 

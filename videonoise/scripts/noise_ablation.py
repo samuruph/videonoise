@@ -13,6 +13,8 @@ All settings come from scripts/config.yaml. Override any value from the CLI:
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 from videonoise.config_loader import load_config
 from videonoise.metrics import compute_metrics_for_folder
 
@@ -28,7 +30,7 @@ def main() -> None:
     print(f"  Noises    : {', '.join(NOISE_TYPES)}")
     print("=" * 64)
 
-    for noise in NOISE_TYPES:
+    for noise in tqdm(NOISE_TYPES, desc="Noise ablation", unit="noise_type"):
         run_key = f"{cfg.model}_{noise}"
         run_out = cfg.results + run_key + "__" + cfg.settings_suffix + "/"
         gen_dir = cfg.data_gen.rstrip("/") + "/" + run_key + "/"

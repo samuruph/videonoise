@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 import torch
+from tqdm import tqdm
 
 # Image extensions recognised as frame sequences
 _FRAME_EXTS = {".jpg", ".jpeg", ".png"}
@@ -76,7 +77,8 @@ def load_video_folder(
     results = []
 
     # 1. Video files
-    for p in sorted(folder.glob(f"*{ext}")):
+    video_paths = sorted(folder.glob(f"*{ext}"))
+    for p in tqdm(video_paths, desc=f"Loading {folder.name}", unit="video", leave=False):
         try:
             results.append((p.stem, load_video_cv2(str(p), **kwargs)))
         except ValueError as exc:
@@ -84,9 +86,10 @@ def load_video_folder(
 
     # 2. Frame-sequence subdirectories (skip if we already found video files)
     if not results:
-        for d in sorted(folder.iterdir()):
-            if d.is_dir() and any(p.suffix.lower() in _FRAME_EXTS for p in d.iterdir()):
-                results.append((d.name, load_frame_sequence(str(d), **kwargs)))
+        subdirs = [d for d in sorted(folder.iterdir())
+                   if d.is_dir() and any(p.suffix.lower() in _FRAME_EXTS for p in d.iterdir())]
+        for d in tqdm(subdirs, desc=f"Loading {folder.name}", unit="seq", leave=False):
+            results.append((d.name, load_frame_sequence(str(d), **kwargs)))
 
     return results
 

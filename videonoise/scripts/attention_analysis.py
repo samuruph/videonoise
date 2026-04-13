@@ -22,6 +22,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tqdm import tqdm
+
 from videonoise.config_loader import build_parser, load_config
 
 
@@ -95,7 +97,7 @@ def _run_inversion_with_hooks(pipe, video, model_type: str, num_steps: int, devi
                 latents = torch.cat([
                     pipe.vae.encode(frames[t:t + 1]).latent_dist.sample()
                     * pipe.vae.config.scaling_factor
-                    for t in range(T)
+                    for t in tqdm(range(T), desc="VAE encode", unit="frame", leave=False)
                 ])
             # Denoise one step to trigger attention hooks
             scheduler = pipe.scheduler
@@ -205,7 +207,7 @@ def main() -> None:
     # ── Real videos: inversion only ───────────────────────────────────────────
     if real_videos:
         print(f"\n  [A] Real videos — inversion attention ({len(real_videos)} videos)")
-        for name, video in real_videos:
+        for name, video in tqdm(real_videos, desc="Real attention", unit="video"):
             print(f"    {name}...")
             agg = _run_inversion_with_hooks(pipe, video, model_type, cfg.num_steps, device)
             plot_attention_maps(agg, cfg.real_out, "real-inversion", name)
@@ -218,7 +220,7 @@ def main() -> None:
     # ── Generated videos: inversion + generation ─────────────────────────────
     if gen_videos:
         print(f"\n  [B] Generated videos — inversion attention ({len(gen_videos)} videos)")
-        for name, video in gen_videos:
+        for name, video in tqdm(gen_videos, desc="Gen attention", unit="video"):
             print(f"    {name}...")
             agg = _run_inversion_with_hooks(pipe, video, model_type, cfg.num_steps, device)
             plot_attention_maps(agg, cfg.gen_out, "gen-inversion", name)

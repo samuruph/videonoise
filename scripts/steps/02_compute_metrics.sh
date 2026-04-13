@@ -3,6 +3,4 @@
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/../.." && pwd)"
 
-python -m videonoise.scripts.compute_metrics \
-    --max_frames 32  \
-    --resize     512 768
+python -m videonoise.scripts.compute_metrics
