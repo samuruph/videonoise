@@ -57,6 +57,48 @@ def temporal_autocorrelation(video: torch.Tensor, max_lag: int = 10) -> dict:
     }
 
 
+def temporal_mutual_information(
+    video: torch.Tensor, max_lag: int = 5, n_bins: int = 32
+) -> dict:
+    """
+    Mutual information between pixel intensities at lag k (k = 1 … max_lag).
+
+    Captures non-linear temporal dependence not visible in ACF.
+    Estimated via 2D histogram joint entropy.
+
+    Args:
+        video:   (T, C, H, W) float tensor in [0, 1].
+        max_lag: Maximum lag to compute.
+        n_bins:  Number of histogram bins per axis.
+
+    Returns:
+        Dict mapping "lag_k" → MI in bits.
+    """
+    gray = to_grayscale(video).squeeze(1)  # (T, H, W)
+    T = gray.shape[0]
+    pixels = gray.reshape(T, -1).numpy()   # (T, N_pixels)
+
+    # Sample at most 4096 random pixel positions for speed
+    N = pixels.shape[1]
+    rng = np.random.default_rng(0)
+    idx = rng.choice(N, size=min(4096, N), replace=False)
+    pixels = pixels[:, idx]  # (T, n_sample)
+
+    result = {}
+    for lag in range(1, min(max_lag + 1, T)):
+        x = pixels[:T - lag].flatten()
+        y = pixels[lag:].flatten()
+        joint, _, _ = np.histogram2d(x, y, bins=n_bins, range=[[0, 1], [0, 1]])
+        joint = joint / (joint.sum() + 1e-12)
+        px = joint.sum(axis=1, keepdims=True)
+        py = joint.sum(axis=0, keepdims=True)
+        px_py = px * py
+        mask = joint > 0
+        mi = float(np.sum(joint[mask] * np.log2(joint[mask] / (px_py[mask] + 1e-12))))
+        result[f"lag_{lag}"] = max(0.0, mi)
+    return result
+
+
 def spatiotemporal_correlation_3d(video: torch.Tensor) -> dict:
     """
     3D FFT of the grayscale video cube; reports low- vs. high-frequency energy ratio.

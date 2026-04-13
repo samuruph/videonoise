@@ -15,18 +15,26 @@ from videonoise.metrics.quality import (
     frame_psnr,
     frame_statistics,
     optical_flow_stats,
+    flow_direction_entropy,
+    lpips_temporal,
+    multiscale_temporal_ssim,
 )
+from videonoise.metrics.correlation import temporal_mutual_information
 from videonoise.metrics.spectral import spatial_power_spectrum
 
 __all__ = [
     "compute_all_metrics",
     "frame_correlation",
     "temporal_autocorrelation",
+    "temporal_mutual_information",
     "spatiotemporal_correlation_3d",
     "temporal_ssim",
     "frame_psnr",
     "frame_statistics",
     "optical_flow_stats",
+    "flow_direction_entropy",
+    "lpips_temporal",
+    "multiscale_temporal_ssim",
     "spatial_power_spectrum",
 ]
 
@@ -38,6 +46,8 @@ def compute_all_metrics(video: torch.Tensor, name: str = "") -> dict:
         "frame_correlation": frame_correlation(video),
         "temporal_acf": temporal_autocorrelation(video),
     }
+    print(f"  {tag} temporal MI...")
+    m["temporal_mi"] = temporal_mutual_information(video)
     print(f"  {tag} spectral...")
     m["spatial_power_spectrum"] = spatial_power_spectrum(video)
     m["spatiotemporal_3d"] = spatiotemporal_correlation_3d(video)
@@ -47,6 +57,10 @@ def compute_all_metrics(video: torch.Tensor, name: str = "") -> dict:
     m["frame_statistics"] = frame_statistics(video)
     print(f"  {tag} optical flow...")
     m["optical_flow"] = optical_flow_stats(video)
+    m["flow_direction_entropy"] = flow_direction_entropy(video)
+    print(f"  {tag} perceptual...")
+    m["lpips_temporal"] = lpips_temporal(video)
+    m["multiscale_ssim"] = multiscale_temporal_ssim(video)
     return m
 
 

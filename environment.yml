@@ -28,6 +28,9 @@ dependencies:
     - accelerate
     - umap-learn
     - lpips
+    - clean-fid
+    - frechet-video-distance
+    - open-clip-torch
     - pyyaml
     - tiktoken
     - sentencepiece

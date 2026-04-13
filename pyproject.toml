@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 diffusion = ["diffusers>=0.26", "transformers", "accelerate", "tiktoken", "sentencepiece", "protobuf", "tokenizers"]
-analysis  = ["umap-learn", "lpips", "clean-fid"]
+analysis  = ["umap-learn", "lpips", "clean-fid", "frechet-video-distance", "open-clip-torch"]
 dev       = ["jupyter", "ipykernel", "pytest"]
 
 [project.scripts]
@@ -36,7 +36,10 @@ vn-stanalysis = "videonoise.scripts.spatiotemporal_analysis:main"
 vn-compare    = "videonoise.scripts.compare_results:main"
 vn-viz        = "videonoise.scripts.viz_metrics:main"
 vn-ablation   = "videonoise.scripts.noise_ablation:main"
-vn-noise-init = "videonoise.noise.generators:_cli"
+vn-noise-init    = "videonoise.noise.generators:_cli"
+vn-dist-metrics  = "videonoise.scripts.distribution_metrics:main"
+vn-attention     = "videonoise.scripts.attention_analysis:main"
+vn-paired        = "videonoise.scripts.paired_analysis:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

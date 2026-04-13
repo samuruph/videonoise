@@ -94,6 +94,53 @@ def cross_frame_correlation(noise: torch.Tensor) -> dict:
     }
 
 
+def noise_covariance_structure(noise: torch.Tensor) -> dict:
+    """
+    Analyse the temporal covariance matrix of the noise tensor.
+
+    Computes the T×T covariance matrix C = X @ X.T / N_pixels, then reports:
+    - off_diagonal_energy_ratio: fraction of Frobenius norm in off-diagonal elements
+      (0 = perfectly i.i.d. across frames; higher → temporal correlations)
+    - top_eigenvalue_ratio: largest eigenvalue / total trace (1/T = uniform = i.i.d.)
+    - top3_eigenvalue_ratio: sum of top-3 eigenvalues / trace
+    - eigenvalue_explained_variance: cumulative explained variance list (length T)
+
+    Args:
+        noise: Tensor of shape (T, ...) — first dim is time.
+
+    Returns:
+        Empty dict if T < 4 (too few frames to be meaningful).
+    """
+    T = noise.shape[0]
+    if T < 4:
+        return {}
+
+    X = noise.float().reshape(T, -1).numpy()  # (T, N_pixels)
+    N = X.shape[1]
+    C = (X @ X.T) / N  # (T, T)
+
+    total = float(np.sum(C ** 2))
+    if total < 1e-12:
+        return {}
+
+    diag_mask = np.eye(T, dtype=bool)
+    off_diag_energy = float(np.sum(C[~diag_mask] ** 2))
+
+    eigvals = np.linalg.eigvalsh(C)  # ascending
+    eigvals = eigvals[::-1]          # descending
+    eigvals = np.maximum(eigvals, 0.0)
+    trace = eigvals.sum() + 1e-12
+
+    cum_explained = (np.cumsum(eigvals) / trace).tolist()
+
+    return {
+        "off_diagonal_energy_ratio":   float(off_diag_energy / total),
+        "top_eigenvalue_ratio":        float(eigvals[0] / trace),
+        "top3_eigenvalue_ratio":       float(eigvals[:3].sum() / trace),
+        "eigenvalue_explained_variance": [float(v) for v in cum_explained],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Inversion methods
 # ---------------------------------------------------------------------------
@@ -204,12 +251,16 @@ def analyze_video_noise(
         else simple_pixel_inversion(video)
     )
     print(f"  {tag} computing statistics...")
-    return {
-        "shape":                 list(noise.shape),
-        "statistics":            noise_statistics(noise),
-        "power_spectrum":        noise_power_spectrum(noise),
+    cov = noise_covariance_structure(noise)
+    result = {
+        "shape":                   list(noise.shape),
+        "statistics":              noise_statistics(noise),
+        "power_spectrum":          noise_power_spectrum(noise),
         "cross_frame_correlation": cross_frame_correlation(noise),
     }
+    if cov:
+        result["covariance_structure"] = cov
+    return result
 
 
 # ---------------------------------------------------------------------------

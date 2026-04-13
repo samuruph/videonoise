@@ -543,6 +543,197 @@ def _figure_05_noise_stats(noise_results: dict, names: list,
     print(f"  Saved → {out}")
 
 
+def _figure_06_motion_structure(per_video: dict, names: list,
+                                 label: str, out: Path) -> None:
+    """
+    06 — Motion Structure & Perceptual Consistency
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    4 panels:
+
+    • Flow direction entropy    — how organised motion direction is (low=coherent)
+    • Multiscale SSIM           — SSIM coherence by spatial scale
+    • Temporal MI               — non-linear frame dependence at lags 1–5
+    • LPIPS temporal            — perceptual consistency between consecutive frames
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(
+        f"06 — Motion Structure & Perceptual Consistency  |  {label}\n"
+        "Flow entropy (lower=coherent), multiscale SSIM, temporal MI, and perceptual consistency.",
+        fontsize=10, fontweight="bold",
+    )
+
+    # flow direction entropy
+    vals = [per_video[n].get("flow_direction_entropy", {}).get(
+                "flow_direction_entropy_mean", float("nan")) for n in names]
+    _bar_per_video(
+        axes[0, 0], names, vals, "entropy (bits)",
+        "Flow Direction Entropy\nShannon entropy of optical-flow angle distribution.\n"
+        "Low → coherent directed motion; ~5.17 bits → fully random.",
+        ref_line=float(np.log2(36)), ref_label="max (random, 5.17 bits)",
+    )
+
+    # multiscale SSIM — line per video, x=scale index
+    ax_ms = axes[0, 1]
+    cmap = plt.get_cmap("tab10")
+    has_data = False
+    for i, n in enumerate(names[:10]):
+        ms = per_video[n].get("multiscale_ssim", {})
+        scales = sorted(k for k in ms if k.startswith("scale_"))
+        if not scales:
+            continue
+        xs = [int(k.split("_")[1]) for k in scales]
+        ys = [ms[k].get("ssim_mean", float("nan")) for k in scales]
+        ax_ms.plot(xs, ys, "-o", markersize=4, alpha=0.7, color=cmap(i), label=n)
+        has_data = True
+    ax_ms.set_xlabel("Scale index (0=full, 1=½, 2=¼, …)")
+    ax_ms.set_ylabel("SSIM mean")
+    ax_ms.set_title(
+        "Multiscale Temporal SSIM\nSSIM between consecutive frames at each spatial scale.\n"
+        "Rapid drop → fine-scale coherence lost; flat → robust temporal structure.",
+        fontsize=8,
+    )
+    ax_ms.grid(color="lightgray", linestyle="--", linewidth=0.6, alpha=0.7)
+    if has_data and len(names) <= 8:
+        ax_ms.legend(fontsize=6, ncol=2)
+
+    # temporal MI — line per video, x=lag
+    ax_mi = axes[1, 0]
+    lags = list(range(1, 6))
+    has_data = False
+    for i, n in enumerate(names[:10]):
+        mi = per_video[n].get("temporal_mi", {})
+        vals_mi = [mi.get(f"lag_{k}", float("nan")) for k in lags]
+        if any(np.isfinite(v) for v in vals_mi):
+            ax_mi.plot(lags, vals_mi, "-o", markersize=4, alpha=0.7, color=cmap(i), label=n)
+            has_data = True
+    ax_mi.axhline(0, color="gray", linestyle="--", linewidth=0.8)
+    ax_mi.set_xlabel("Lag (frames)")
+    ax_mi.set_ylabel("MI (bits)")
+    ax_mi.set_title(
+        "Temporal Mutual Information\nNon-linear frame dependence at lags 1–5.\n"
+        "Higher MI at lag 1 → strong temporal structure; fast decay → weak coherence.",
+        fontsize=8,
+    )
+    ax_mi.grid(color="lightgray", linestyle="--", linewidth=0.6, alpha=0.7)
+    if has_data and len(names) <= 8:
+        ax_mi.legend(fontsize=6, ncol=2)
+
+    # LPIPS temporal
+    vals = [per_video[n].get("lpips_temporal", {}).get("lpips_mean", float("nan")) for n in names]
+    _bar_per_video(
+        axes[1, 1], names, vals, "LPIPS",
+        "LPIPS Temporal Consistency\nPerceptual distance between consecutive frames.\n"
+        "Lower → more perceptually smooth; 0 = identical frames.",
+        ref_line=0.0, ref_label="identical (0)",
+    )
+
+    plt.tight_layout()
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved → {out}")
+
+
+def _figure_07_noise_covariance(noise_results: dict, names: list,
+                                  label: str, out: Path) -> None:
+    """
+    07 — Noise Covariance Structure  (step 03, optional)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    4 panels analysing temporal covariance of inverted noise:
+
+    • Off-diagonal energy ratio — fraction of covariance energy off the diagonal
+    • Top eigenvalue ratio      — dominance of the largest eigenvalue
+    • Cumulative explained var  — how fast eigenvalues accumulate energy
+    • Normalised eigenspectra   — log-scale eigenvalue distributions per video
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(
+        f"07 — Noise Covariance Structure  |  {label}\n"
+        "Temporal covariance matrix of the inverted noise latent. "
+        "i.i.d. Gaussian: off-diag≈0, uniform eigenspectrum.",
+        fontsize=10, fontweight="bold",
+    )
+    noise_pv = noise_results.get("per_video", {})
+
+    # off-diagonal energy ratio
+    vals = [noise_pv.get(n, {}).get("covariance_structure", {}).get(
+                "off_diagonal_energy_ratio", float("nan")) for n in names]
+    _bar_per_video(
+        axes[0, 0], names, vals, "ratio [0–1]",
+        "Off-Diagonal Energy Ratio\nFraction of Frobenius norm from off-diagonal C entries.\n"
+        "0 = perfectly i.i.d. frames; higher → temporal structure in noise.",
+        color="mediumseagreen", ref_line=0.0, ref_label="i.i.d. (0)",
+    )
+
+    # top eigenvalue ratio
+    vals = [noise_pv.get(n, {}).get("covariance_structure", {}).get(
+                "top_eigenvalue_ratio", float("nan")) for n in names]
+    # reference: 1/T (uniform spectrum)
+    T_ref = None
+    for n in names:
+        shape = noise_pv.get(n, {}).get("shape")
+        if shape:
+            T_ref = shape[0]
+            break
+    ref_line = 1.0 / T_ref if T_ref else None
+    _bar_per_video(
+        axes[0, 1], names, vals, "ratio [0–1]",
+        "Top Eigenvalue Ratio\nFraction of total variance in the dominant eigenvector.\n"
+        "1/T = uniform spectrum (i.i.d.); higher → low-rank temporal structure.",
+        color="mediumseagreen",
+        ref_line=ref_line,
+        ref_label=f"uniform (1/T={ref_line:.3f})" if ref_line else None,
+    )
+
+    # cumulative explained variance — lines per video
+    ax_cum = axes[1, 0]
+    cmap = plt.get_cmap("tab10")
+    has_data = False
+    for i, n in enumerate(names[:10]):
+        cev = noise_pv.get(n, {}).get("covariance_structure", {}).get(
+            "eigenvalue_explained_variance", [])
+        if cev:
+            ax_cum.plot(range(1, len(cev) + 1), cev, "-", alpha=0.7, color=cmap(i), label=n)
+            has_data = True
+    ax_cum.set_xlabel("Eigenvalue index")
+    ax_cum.set_ylabel("Cumulative explained variance")
+    ax_cum.set_title(
+        "Cumulative Eigenvalue Explained Variance\n"
+        "How fast the eigenspectrum concentrates energy.\n"
+        "i.i.d. noise → linear diagonal line; structured → fast initial rise.",
+        fontsize=8,
+    )
+    ax_cum.grid(color="lightgray", linestyle="--", linewidth=0.6, alpha=0.7)
+    if has_data and len(names) <= 8:
+        ax_cum.legend(fontsize=6, ncol=2)
+
+    # normalised eigenspectra (log scale)
+    ax_eig = axes[1, 1]
+    has_data = False
+    for i, n in enumerate(names[:10]):
+        cev = noise_pv.get(n, {}).get("covariance_structure", {}).get(
+            "eigenvalue_explained_variance", [])
+        if len(cev) > 1:
+            marginal = np.diff([0.0] + list(cev))
+            ax_eig.semilogy(range(1, len(marginal) + 1), marginal + 1e-9,
+                            "-", alpha=0.7, color=cmap(i), label=n)
+            has_data = True
+    ax_eig.set_xlabel("Eigenvalue index")
+    ax_eig.set_ylabel("Marginal variance (log)")
+    ax_eig.set_title(
+        "Normalised Eigenvalue Spectrum (log)\n"
+        "Flat → white noise; rapid decay → dominant temporal modes.",
+        fontsize=8,
+    )
+    ax_eig.grid(color="lightgray", linestyle="--", linewidth=0.6, alpha=0.7)
+    if has_data and len(names) <= 8:
+        ax_eig.legend(fontsize=6, ncol=2)
+
+    plt.tight_layout()
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved → {out}")
+
+
 def plot_all_single(results: dict, label: str, output_dir: str,
                     noise_results: dict = None) -> None:
     """
@@ -558,6 +749,8 @@ def plot_all_single(results: dict, label: str, output_dir: str,
       03_spectral.png
       04_frame_content.png
       05_noise_stats.png          ← only when noise_results is provided
+      06_motion_structure.png     ← when new metric keys are present
+      07_noise_covariance.png     ← only when noise_results has covariance_structure
     """
     per_video = results.get("per_video", {})
     names     = list(per_video.keys())
@@ -582,6 +775,28 @@ def plot_all_single(results: dict, label: str, output_dir: str,
     else:
         print("  (skipping 05_noise_stats — no noise JSON provided; "
               "run step 03 and pass --noise_stats)")
+
+    # Figure 06: new motion-structure metrics (only if keys are present)
+    first = next(iter(per_video.values()), {})
+    has_new_metrics = any(
+        k in first for k in ("flow_direction_entropy", "temporal_mi", "lpips_temporal", "multiscale_ssim")
+    )
+    if has_new_metrics:
+        _figure_06_motion_structure(per_video, names, label, out_dir / "06_motion_structure.png")
+    else:
+        print("  (skipping 06_motion_structure — rerun step 02 to compute new metrics)")
+
+    # Figure 07: noise covariance (only if noise_results has covariance_structure)
+    if noise_results is not None:
+        noise_pv = noise_results.get("per_video", {})
+        has_cov = any(
+            "covariance_structure" in noise_pv.get(n, {})
+            for n in names
+        )
+        if has_cov:
+            _figure_07_noise_covariance(noise_results, names, label, out_dir / "07_noise_covariance.png")
+        else:
+            print("  (skipping 07_noise_covariance — rerun step 03 to compute covariance structure)")
 
     print(f"\n  All plots saved to {out_dir}/")
 

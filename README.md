@@ -29,17 +29,19 @@ videonoise/
 ├── videonoise/               # Python package (pip install -e .)
 │   ├── io/video.py           # Video loading / saving
 │   ├── metrics/
-│   │   ├── correlation.py    # Frame correlation, ACF, 3D spatio-temporal
-│   │   ├── quality.py        # SSIM, PSNR, optical flow
-│   │   └── spectral.py       # 2D/3D power spectrum
+│   │   ├── correlation.py    # Frame correlation, ACF, temporal MI, 3D spatio-temporal
+│   │   ├── quality.py        # SSIM, PSNR, optical flow, LPIPS, flow entropy, multiscale SSIM
+│   │   ├── spectral.py       # 2D/3D power spectrum
+│   │   └── distribution.py   # FVD, cross-set LPIPS, CLIP score (dataset-level)
 │   ├── noise/
 │   │   ├── generators.py     # Noise init strategies (Gaussian, AR1, blue, Perlin …)
-│   │   └── inversion.py      # DDIM inversion + noise statistics
+│   │   └── inversion.py      # DDIM inversion + noise statistics + covariance structure
 │   ├── diffusion/
 │   │   └── pipelines.py      # SVD pipeline wrapper + custom-noise injection
 │   ├── analysis/
 │   │   ├── spatiotemporal.py # PCA, UMAP
-│   │   └── plots.py          # Comparison figures, summary tables
+│   │   ├── attention.py      # Attention hook registration, aggregation, plotting
+│   │   └── plots.py          # All figures 01–08, comparison tables
 │   ├── scripts/              # CLI entry points (python -m videonoise.scripts.X)
 │   └── utils.py              # Device selection, JSON I/O
 ├── scripts/
@@ -243,10 +245,13 @@ bash scripts/steps/01_generate_videos.sh      # generate with chosen model + noi
 bash scripts/steps/01b_download_generated.sh  # download pre-generated AI videos    [no GPU]
 bash scripts/steps/01c_download_matched.sh    # download matched (gen, real) pairs   [no GPU]
 bash scripts/steps/02_compute_metrics.sh      # correlation, spectral, quality metrics
-bash scripts/steps/03_noise_inversion.sh      # DDPM inversion + noise stats
+bash scripts/steps/03_noise_inversion.sh      # DDIM inversion + noise stats
 bash scripts/steps/04_spatiotemporal.sh       # PCA + 3D power spectrum
-bash scripts/steps/05_noise_init_ablation.sh  # sweep all 5 noise types
+bash scripts/steps/05_noise_init_ablation.sh  # sweep all 5 noise types              [GPU]
 bash scripts/steps/06_compare_results.sh      # summary table + comparison figure
+bash scripts/steps/07_distribution_metrics.sh # FVD, cross-set LPIPS, CLIP score
+bash scripts/steps/08_attention_analysis.sh   # attention map extraction + analysis  [GPU]
+bash scripts/steps/09_paired_analysis.sh      # paired Δ analysis + Wilcoxon tests
 ```
 
 ### Overriding settings per run
@@ -347,12 +352,15 @@ any config param. Use `--help` to see all available flags.
 |-------------|--------------|---------|
 | `download_data.py` | `00_download_data.sh` | Download real reference videos |
 | `generate_videos.py` | `01_generate_videos.sh` | Generate videos (model + custom noise) [GPU] |
-| `compute_metrics.py` | `02_compute_metrics.sh` | Correlation, spectral, quality metrics → JSON |
-| `noise_inversion.py` | `03_noise_inversion.sh` | Noise inversion + statistical characterisation → JSON |
+| `compute_metrics.py` | `02_compute_metrics.sh` | Correlation, spectral, quality, perceptual metrics → JSON |
+| `noise_inversion.py` | `03_noise_inversion.sh` | Noise inversion + statistical characterisation + covariance → JSON |
 | `spatiotemporal.py` | `04_spatiotemporal.sh` | PCA, UMAP, 3D FFT → plots |
 | `noise_ablation.py` | `05_noise_init_ablation.sh` | Sweep all 5 noise types |
 | `compare_results.py` | `06_compare_results.sh` | Summary table + comparison figure |
-| `viz.py` | `viz.sh` | Visualise a single run's metrics (`--mode real\|gen\|both`) |
+| `distribution_metrics.py` | `07_distribution_metrics.sh` | FVD, cross-set LPIPS, CLIP score → JSON + figure |
+| `attention_analysis.py` | `08_attention_analysis.sh` | Attention map extraction + comparison [GPU] |
+| `paired_analysis.py` | `09_paired_analysis.sh` | Paired Δ analysis + Wilcoxon tests → figure |
+| — | `viz.sh` | Visualise a single run's metrics (`--mode real\|gen\|both`) |
 
 ### Low-level CLI entry points — `vn-*`
 
@@ -366,7 +374,10 @@ These are called by the step scripts internally; you can also use them directly.
 | `vn-stanalysis` | `videonoise.scripts.spatiotemporal_analysis` | ST analysis |
 | `vn-compare` | `videonoise.scripts.compare_results` | Comparison figure |
 | `vn-viz` | `videonoise.scripts.viz_metrics` | Single-run visualisation |
-| `vn-noise-init` | `videonoise.scripts.noise_init` | Noise shape comparison |
+| `vn-noise-init` | `videonoise.noise.generators` | Noise shape comparison |
+| `vn-dist-metrics` | `videonoise.scripts.distribution_metrics` | FVD + LPIPS + CLIP |
+| `vn-attention` | `videonoise.scripts.attention_analysis` | Attention analysis [GPU] |
+| `vn-paired` | `videonoise.scripts.paired_analysis` | Paired video analysis |
 
 ### Common CLI flags (all step scripts)
 
@@ -400,6 +411,10 @@ These are called by the step scripts internally; you can also use them directly.
 | PSNR (frame-to-frame) | `psnr.psnr_mean` | `01_temporal_coherence.png` |
 | Temporal ACF (lags 1–10) | `temporal_acf.lag_k` | `02_motion_dynamics.png` |
 | Flow magnitude (mean, std, p95) | `optical_flow.flow_mag_*` | `02_motion_dynamics.png` |
+| **Flow direction entropy** ★ | `flow_direction_entropy.flow_direction_entropy_mean` | `06_motion_structure.png` |
+| **LPIPS temporal** ★ | `lpips_temporal.lpips_mean` | `06_motion_structure.png` |
+| Multiscale temporal SSIM | `multiscale_ssim.scale_{0..3}.ssim_mean` | `06_motion_structure.png` |
+| **Temporal MI** ★ | `temporal_mi.lag_{1..5}` | `06_motion_structure.png` |
 | **Spatial spectral slope** ★ | `spatial_power_spectrum.spectral_slope` | `03_spectral.png` |
 | Spectral R² | `spatial_power_spectrum.spectral_r2` | `03_spectral.png` |
 | 3D low-freq energy ratio | `spatiotemporal_3d.low_freq_energy_ratio` | `03_spectral.png` |
@@ -414,6 +429,9 @@ These are called by the step scripts internally; you can also use them directly.
 | Noise moments (mean/std/skew/kurt) | `statistics.*` | `05_noise_stats.png` |
 | **Cross-frame noise correlation** ★ | `cross_frame_correlation.cross_frame_corr_mean` | `05_noise_stats.png` |
 | Noise spectral slope | `power_spectrum.spectral_slope_1d` | `05_noise_stats.png` |
+| **Off-diagonal energy ratio** ★ | `covariance_structure.off_diagonal_energy_ratio` | `07_noise_covariance.png` |
+| Top eigenvalue ratio | `covariance_structure.top_eigenvalue_ratio` | `07_noise_covariance.png` |
+| Eigenvalue explained variance | `covariance_structure.eigenvalue_explained_variance` | `07_noise_covariance.png` |
 
 ### Step 04 outputs — `results/<run_key>/spatiotemporal/`
 
@@ -422,6 +440,32 @@ These are called by the step scripts internally; you can also use them directly.
 | `pca_spatial_mode_{0,1,2}.png` | Dominant spatial patterns varying over time |
 | `pca_temporal_0.png` | Amplitude of mode 0 across frames |
 | `*_3d_spectrum.png` | Log-power vs temporal / spatial frequency axes |
+
+### Step 07 outputs — `results/<gen_key>/distribution_metrics.json`
+
+| Metric | JSON key | Plot |
+|--------|----------|------|
+| FVD | `fvd` | `08_distribution_metrics.png` |
+| LPIPS temporal (real) | `lpips_temporal_real` | `08_distribution_metrics.png` |
+| LPIPS temporal (gen) | `lpips_temporal_gen` | `08_distribution_metrics.png` |
+| LPIPS real vs gen | `lpips_real_vs_gen_mean` | `08_distribution_metrics.png` |
+| CLIP score | `clip_score_mean` | `08_distribution_metrics.png` |
+
+### Step 08 outputs — `results/<run_key>/attention/`
+
+| File | What it shows |
+|------|---------------|
+| `<video>/attn_self_overview.png` | Self-attention activation grid per layer |
+| `<video>/attn_cross_overview.png` | Cross-attention activations (text-conditioned models) |
+| `attention_stats.json` | Entropy, mean, max/mean ratio per layer |
+| `inversion_comparison.png` | Real vs generated inversion attention entropy (gen folder) |
+
+### Step 09 outputs — `results/<gen_key>/`
+
+| File | What it shows |
+|------|---------------|
+| `paired_stats.json` | Wilcoxon p-values + median Δ per metric |
+| `paired_analysis/01_metric_deltas.png` | Violin plots of gen − real Δ with p-value annotations |
 
 ---
 

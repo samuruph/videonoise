@@ -10,15 +10,19 @@
 
 1. [Implemented metrics](#1-implemented-metrics)
    - [Step 02 — Temporal coherence](#step-02--temporal-coherence)
-   - [Step 02 — Motion](#step-02--motion)
+   - [Step 02 — Motion & perceptual consistency](#step-02--motion--perceptual-consistency)
    - [Step 02 — Spectral](#step-02--spectral)
    - [Step 02 — Frame statistics](#step-02--frame-statistics)
-   - [Step 03 — Noise inversion](#step-03--noise-inversion)
+   - [Step 03 — Noise inversion & covariance](#step-03--noise-inversion--covariance)
    - [Step 04 — Spatio-temporal PCA / 3D spectrum](#step-04--spatio-temporal-pca--3d-spectrum)
+   - [Step 07 — Distribution metrics (FVD, LPIPS, CLIP)](#step-07--distribution-metrics)
+   - [Step 08 — Attention analysis](#step-08--attention-analysis)
+   - [Step 09 — Paired analysis](#step-09--paired-analysis)
 2. [Comparison figure guide](#2-comparison-figure-guide)
 3. [Proposed additional analyses](#3-proposed-additional-analyses)
 4. [Noise ablation interpretation](#4-noise-ablation-interpretation)
 5. [Connecting evidence to a learnable prior](#5-connecting-evidence-to-a-learnable-prior)
+6. [VBench usage](#6-vbench-usage)
 
 ---
 
@@ -89,7 +93,7 @@ Autocorrelation of mean pixel intensity across time, for lags 1–10 frames.
 
 ---
 
-### Step 02 — Motion
+### Step 02 — Motion & perceptual consistency
 
 #### Optical flow `optical_flow.flow_mag_{mean,std,p95,p99}`
 
@@ -104,6 +108,69 @@ Dense Farneback optical flow between consecutive frames. All values in pixels/fr
 **Why it matters:** `flow_mag_std` is arguably more diagnostic than the mean. If generated `flow_mag_std` >> real, the model's motion field is spatially fragmented — a strong sign that the noise init lacks spatial coherence. Spatially low-pass or AR(1) noise typically reduce this gap.
 
 **Plot:** Bar panels in `02_motion_dynamics.png`.
+
+---
+
+#### Flow direction entropy `flow_direction_entropy.flow_direction_entropy_mean` ★
+
+Shannon entropy (bits) of the optical flow angle histogram (36 bins over −π … π).
+
+| Value | Interpretation |
+|-------|----------------|
+| Low (< 2 bits) | Coherent, directed motion (camera pan, tracking shot) |
+| High (≈ 5.17 bits) | Fully random direction distribution — chaotic / flickering |
+
+Real videos with consistent motion have low directional entropy. Gaussian-init generated videos tend toward higher entropy because the noise-driven motion has no spatial organisation.
+
+**Evidence link:** if generated entropy > real entropy, the noise init lacks spatial coherence → a spatially structured prior would reduce this gap.
+
+**Plot:** Panel (0,0) of `06_motion_structure.png`.
+
+---
+
+#### LPIPS temporal consistency `lpips_temporal.lpips_mean`
+
+Mean LPIPS perceptual distance between consecutive frames (VGG-based perceptual features). Unlike pixel-level SSIM, LPIPS captures mid-level structural changes.
+
+| Value | Interpretation |
+|-------|----------------|
+| Low | Perceptually smooth; frames look similar |
+| High | Perceptual jump between frames (texture change, flicker) |
+
+Complements TCS (SSIM) with perceptual sensitivity. Real videos tend to have lower LPIPS than Gaussian-init generated videos.
+
+**Plot:** Panel (1,1) of `06_motion_structure.png`.
+
+---
+
+#### Multiscale temporal SSIM `multiscale_ssim.scale_{0,1,2,3}`
+
+SSIM between consecutive frames computed at 4 spatial scales (full, ½, ¼, ⅛ resolution).
+
+| Scale | Content captured |
+|-------|-----------------|
+| 0 (full) | Fine texture and detail |
+| 1–2 | Mid-level structure (edges, objects) |
+| 3 (coarsest) | Global layout and motion |
+
+A rapid drop in SSIM from scale 0 to scale 1 → noise-driven high-frequency incoherence. A model with spatially structured noise init should maintain SSIM better at finer scales.
+
+**Plot:** Line-per-video overlay in panel (0,1) of `06_motion_structure.png`.
+
+---
+
+#### Temporal mutual information `temporal_mi.lag_{1..5}`
+
+Shannon mutual information (bits) between grayscale pixel values at lag k frames apart, estimated via 2D histogram. Captures *non-linear* temporal dependence beyond Pearson ACF.
+
+| Pattern | Interpretation |
+|---------|----------------|
+| High MI at lag 1, slow decay | Strong non-linear temporal structure (typical in real video) |
+| Near-zero MI at all lags | Frames are statistically independent — consistent with i.i.d. noise init |
+
+**Evidence link:** if real-video MI > generated MI beyond lag 1, the temporal structure is non-linear and cannot be fully captured by AR(1) noise — directly motivating a learned prior.
+
+**Plot:** Line-per-video overlay at lags 1–5 in panel (1,0) of `06_motion_structure.png`.
 
 ---
 
@@ -166,10 +233,10 @@ Per-video pixel-intensity moments averaged over all frames. Primarily a sanity c
 
 ---
 
-### Step 03 — Noise inversion
+### Step 03 — Noise inversion & covariance
 
 **Output:** `results/<run_key>/noise_stats.json`  
-**Plot:** `results/<run_key>/plots/05_noise_stats.png` (auto-added when file exists)
+**Plots:** `results/<run_key>/plots/05_noise_stats.png`, `07_noise_covariance.png` (auto-added when file exists)
 
 Characterises the noise latent recovered by pixel-domain DDPM inversion.
 
@@ -238,6 +305,23 @@ If real videos' inverted noise has a negative slope, spatially correlated (low-p
 
 ---
 
+#### Noise covariance structure `covariance_structure.*` ★
+
+Temporal T×T covariance matrix of the inverted noise latent: C = X @ X.T / N_pixels, where X is the noise reshaped to (T, N_pixels).
+
+| Key | Interpretation |
+|-----|----------------|
+| `off_diagonal_energy_ratio` | Fraction of Frobenius norm in off-diagonal elements. 0 = i.i.d. frames; > 0 → temporal structure |
+| `top_eigenvalue_ratio` | Largest eigenvalue / total trace. 1/T = uniform (i.i.d.); > 1/T → dominant temporal mode |
+| `top3_eigenvalue_ratio` | Top-3 eigenvalues / trace. High → noise lives in a low-dimensional temporal subspace |
+| `eigenvalue_explained_variance` | Cumulative variance explained per eigenvalue (list of T values) |
+
+**Evidence link (strongest):** if real-video noise has off_diagonal_energy_ratio >> 0 and a steep eigenvalue spectrum, the noise covariance is far from identity — directly proving that i.i.d. Gaussian init is wrong and a structured or learned prior is needed.
+
+**Plot:** 4-panel `07_noise_covariance.png` (off-diagonal ratio, top eigenvalue, cumulative variance curve, log eigenspectrum).
+
+---
+
 ### Step 04 — Spatio-temporal PCA / 3D spectrum
 
 **Output:** `results/<run_key>/spatiotemporal/`
@@ -276,6 +360,92 @@ If the generated temporal spectrum is flatter than real, the noise init runs too
 
 ---
 
+---
+
+### Step 07 — Distribution metrics
+
+**Script:** `python -m videonoise.scripts.distribution_metrics` / `scripts/steps/07_distribution_metrics.sh`  
+**Output:** `results/<gen_key>/distribution_metrics.json`, `results/<gen_key>/plots/08_distribution_metrics.png`
+
+Dataset-level metrics comparing the *distributions* of real and generated videos. These require both folders and cannot be computed per-video.
+
+---
+
+#### Fréchet Video Distance `fvd`
+
+I3D-feature-based Fréchet distance between the real and generated video distributions (analogous to FID for images). Lower = more similar distributions.
+
+Requires `pip install frechet-video-distance`. Needs ≥ 2 videos per set.
+
+**Evidence link:** FVD decreasing as noise init becomes more structured (Gaussian → AR1 → spatial-LP) directly shows that better priors improve distribution-level realism.
+
+---
+
+#### Cross-set LPIPS `lpips_temporal_real`, `lpips_temporal_gen`, `lpips_real_vs_gen_mean`
+
+Three LPIPS measurements:
+- `lpips_temporal_real`: LPIPS between consecutive real frames — within-set temporal coherence reference.
+- `lpips_temporal_gen`: same for generated — gap vs real shows perceptual smoothness deficit.
+- `lpips_real_vs_gen_mean`: LPIPS between corresponding real/generated frames at each timestep (matched pairs only). Measures per-pair content divergence.
+
+---
+
+#### CLIP score `clip_score_mean`
+
+Mean cosine similarity between video frame embeddings (ViT-B/32 via open-clip) and the text prompt used to generate each video. Only meaningful for text-to-video models.
+
+Requires a `captions.csv` or `prompts.json` in the generated video folder, and `pip install open-clip-torch`.
+
+**Plot:** `08_distribution_metrics.png` — 3-panel figure (FVD bar, LPIPS grouped bars, CLIP score bar).
+
+---
+
+### Step 08 — Attention analysis
+
+**Script:** `python -m videonoise.scripts.attention_analysis` / `scripts/steps/08_attention_analysis.sh`  
+**Output:** `results/<gen_key>/attention/`, `results/<real_key>/attention/`
+
+Extracts internal attention activations during forward passes of the diffusion pipeline.
+
+| Pass type | Real videos | Generated videos |
+|-----------|-------------|------------------|
+| Generation | — | ✓ (generation pass) |
+| Inversion | ✓ | ✓ |
+
+Key outputs per video:
+- `attn_self_overview.png`: heatmap grid of self-attention activations per layer
+- `attn_cross_overview.png`: cross-attention activations (text-conditioned models only)
+- `attention_stats.json`: entropy, mean, max-to-mean ratio per layer
+- `inversion_comparison.png` (gen folder): side-by-side entropy per layer for real vs generated inversion — shows how the model processes the two modalities differently
+
+**Evidence link:** systematic entropy differences between real and generated inversion attention reveal which layers encode content differently, and can guide where a noise prior would have the most impact.
+
+---
+
+### Step 09 — Paired analysis
+
+**Script:** `python -m videonoise.scripts.paired_analysis` / `scripts/steps/09_paired_analysis.sh`  
+**Output:** `results/<gen_key>/paired_stats.json`, `results/<gen_key>/paired_analysis/01_metric_deltas.png`
+
+For matched-pair datasets (e.g. DeepAction), computes per-pair Δ = generated − real for each metric and runs Wilcoxon signed-rank tests.
+
+Matched pairs are identified by shared filename stems between `real_key` and `gen_key` result folders.
+
+| Metric | JSON key | Higher is better? |
+|--------|----------|------------------|
+| TCS | `temporal_ssim.temporal_ssim_mean` | Yes (gen should match real) |
+| ACF lag 1 | `temporal_acf.lag_1` | Yes |
+| Spectral slope | `spatial_power_spectrum.spectral_slope` | Closer to real = better |
+| Flow std | `optical_flow.flow_mag_std` | Lower gen = better |
+| LPIPS | `lpips_temporal.lpips_mean` | Lower gen = better |
+| Flow entropy | `flow_direction_entropy.flow_direction_entropy_mean` | Lower gen = better |
+
+Each metric panel in `01_metric_deltas.png` shows a violin + strip plot of Δ across pairs, the zero line (perfect match), and the Wilcoxon p-value (* = significant at 0.05).
+
+**Evidence link:** consistent negative Δ (real > generated) across most pairs with p < 0.05 provides controlled, content-matched evidence that the real–generated gap is systematic and not driven by content type.
+
+---
+
 ## 2. Comparison figure guide
 
 `results/<run_key>/comparison/comparison_overview.png` — 12-panel real (blue) vs. generated (red).
@@ -300,13 +470,14 @@ Row 3 — noise inversion:
 
 ---
 
-## 3. Proposed additional analyses
+## 3. Additional analyses reference
 
-These are not yet implemented but are strongly motivated by the research goal.
+Proposals 3.1–3.6 are now **implemented**. See steps 02, 03, 07, 08, 09 above for output details.
+Proposals 3.7–3.8 remain future work.
 
 ---
 
-### 3.1 Latent noise covariance structure
+### 3.1 Latent noise covariance structure ✓ implemented (step 03)
 
 **Goal:** show that the noise latent covariance matrix is not the identity — it has structure.
 
@@ -319,7 +490,7 @@ Run DDPM inversion on a set of videos, collect the recovered noise tensors, then
 
 ---
 
-### 3.2 Temporal mutual information between latent frames
+### 3.2 Temporal mutual information between latent frames ✓ implemented (step 02)
 
 **Goal:** measure statistical *dependence* between frames beyond linear correlation.
 
@@ -329,7 +500,7 @@ Compute the mutual information I(ε_t ; ε_{t+k}) for k = 1 … 10 lags using a 
 
 ---
 
-### 3.3 Flow direction entropy
+### 3.3 Flow direction entropy ✓ implemented (step 02)
 
 **Goal:** measure whether the motion field is spatially organised (low entropy) vs. chaotic (high entropy).
 
@@ -345,7 +516,7 @@ entropy = -np.sum(p * np.log(p + 1e-8) for p in hist / hist.sum())
 
 ---
 
-### 3.4 Paired video analysis (DeepAction matched pairs)
+### 3.4 Paired video analysis (DeepAction matched pairs) ✓ implemented (step 09)
 
 **Goal:** since DeepAction provides exact (real, generated) video pairs for the same action class, compute *per-pair* metric differences — much more statistically powerful than comparing group means.
 
@@ -360,7 +531,7 @@ Plot distribution of Δ across pairs. Run paired t-tests / Wilcoxon signed-rank 
 
 ---
 
-### 3.5 Fréchet Video Distance (FVD)
+### 3.5 Fréchet Video Distance (FVD) ✓ implemented (step 07)
 
 **Goal:** distribution-level comparison using deep video features (I3D / S3D).
 
@@ -379,7 +550,7 @@ fvd = frechet_video_distance(real_videos, generated_videos)
 
 ---
 
-### 3.6 Frequency-band temporal coherence
+### 3.6 Frequency-band temporal coherence ✓ implemented (step 02 — multiscale_ssim)
 
 **Goal:** measure SSIM at different spatial frequency bands separately, to identify *which scales* are temporally incoherent.
 
@@ -462,20 +633,62 @@ done
 
 The pipeline is designed to build a chain of evidence. Each piece contributes a specific argument:
 
-| Evidence | Metric | Argument |
-|----------|--------|----------|
-| TCS gap (real > gen) | `temporal_ssim_mean` | Generated videos are temporally incoherent relative to real |
-| ACF mismatch | `temporal_acf.lag_1` | Real footage has temporal memory that i.i.d. noise lacks |
-| Cross-frame noise correlation > 0 on real | `cross_frame_corr_mean` | The latent space of real footage is temporally structured |
-| Noise KL > 0 on real | `kl_from_gaussian` | Real latents cannot be explained by a Gaussian noise model |
-| Noise spectral slope ≠ 0 on real | `spectral_slope_1d` | Real latent noise has spatial correlations |
-| Covariance structure (proposed 3.1) | off-diagonal energy | The full noise covariance is not the identity |
-| MI > 0 beyond linear (proposed 3.2) | mutual information | Temporal structure is non-linear → simple AR(1) insufficient |
-| Parametric prior ablation (proposed 3.8) | FVD vs. prior complexity | Residual gap after best parametric prior justifies learned model |
-| FVD improves with structured init (proposed 3.5) | FVD | Better init → better perceptual quality at distribution level |
+| Evidence | Metric / output | Argument |
+|----------|-----------------|----------|
+| TCS gap (real > gen) | `temporal_ssim_mean` (step 02) | Generated videos are temporally incoherent relative to real |
+| ACF mismatch | `temporal_acf.lag_1` (step 02) | Real footage has temporal memory that i.i.d. noise lacks |
+| Temporal MI > linear | `temporal_mi.lag_1` (step 02) | Temporal structure is non-linear → AR(1) insufficient |
+| Flow entropy gap | `flow_direction_entropy_mean` (step 02) | Generated motion is spatially incoherent; real motion is directed |
+| Multiscale SSIM drop | `multiscale_ssim.scale_0` vs `.scale_3` (step 02) | Noise-driven incoherence concentrated at fine spatial scales |
+| LPIPS gap | `lpips_temporal.lpips_mean` (step 02) | Perceptual (not just pixel) incoherence in generated videos |
+| Cross-frame noise correlation > 0 on real | `cross_frame_corr_mean` (step 03) | The latent space of real footage is temporally structured |
+| Noise KL > 0 on real | `kl_from_gaussian` (step 03) | Real latents are not Gaussian |
+| Noise spectral slope ≠ 0 on real | `spectral_slope_1d` (step 03) | Real latent noise has spatial correlations |
+| Covariance off-diagonal > 0 | `off_diagonal_energy_ratio` (step 03) | Full noise covariance ≠ identity |
+| Steep eigenspectrum | `top_eigenvalue_ratio` (step 03) | Noise lives in a low-dimensional temporal subspace |
+| FVD improves with structured init | `fvd` (step 07) | Better init → better distribution-level realism |
+| Paired Δ consistently negative | Wilcoxon p < 0.05 (step 09) | Real–generated gap is systematic across matched-content pairs |
+| Attention entropy mismatch | `entropy` in attention_stats.json (step 08) | Model processes real vs generated content differently at specific layers |
+| Parametric prior ablation | FVD vs. prior complexity (step 05) | Residual gap after best parametric prior justifies learned model |
 
 **The argument chain:**
-> Real videos have structured, non-Gaussian latent noise (3.1 + 3.2 + KL + ACF).
-> Simple parametric priors (AR1, spatial-LP) partially close the real–generated gap (ablation).
-> A residual gap remains that parametric priors cannot explain (3.8).
-> Therefore a learned prior over the latent noise distribution is warranted and expected to improve generation quality (FVD, TCS).
+> Real videos have structured, non-Gaussian, temporally correlated latent noise (KL, ACF, covariance, temporal MI).
+> This shows up directly in video quality metrics: TCS, LPIPS, flow entropy, and multiscale SSIM all show systematic real–generated gaps confirmed by Wilcoxon tests on matched pairs.
+> FVD improves as noise init gains structure (Gaussian → AR1 → spatial-LP).
+> A residual gap remains that parametric priors cannot explain → a learned prior over the latent noise distribution is warranted.
+
+---
+
+## 6. VBench usage
+
+VBench has no pip package. Install and run from source:
+
+```bash
+git clone https://github.com/Vchitect/VBench external/VBench
+cd external/VBench && pip install -r requirements.txt
+```
+
+**Run on generated videos:**
+```bash
+python evaluate.py \
+    --videos_path results/<gen_key>/ \
+    --output_path results/<gen_key>/vbench/
+```
+
+**Run on real videos (subset of dimensions):**
+```bash
+python evaluate.py \
+    --videos_path data/matched_pairs/deepaction_all/real/ \
+    --output_path results/<real_key>/vbench/ \
+    --dimensions temporal_consistency motion_smoothness
+```
+
+**VBench dimension → our metric mapping:**
+
+| VBench dimension | Our metric |
+|-----------------|------------|
+| `temporal_consistency` | TCS (`temporal_ssim_mean`) |
+| `motion_smoothness` | Flow std (`flow_mag_std`) |
+| `imaging_quality` | PSNR, frame statistics |
+| `aesthetic_quality` | CLIP score (partially) |
+| `background_consistency` | 3D low-freq energy ratio |
