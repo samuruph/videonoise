@@ -76,12 +76,16 @@ def _bar_per_video(
 def _line_acf(ax, per_video: dict, names: list, color: str = _COLOR) -> None:
     """Overlay temporal ACF curves (lags 1–10) for each video."""
     lags = list(range(1, 11))
-    cmap = plt.get_cmap("tab10")
-    for i, n in enumerate(names[:10]):
+    mean_acf = []
+    for i, n in enumerate(names):
         acf = per_video[n].get("temporal_acf", {})
         vals = [acf.get(f"lag_{k}", float("nan")) for k in lags]
-        ax.plot(lags, vals, "-o", alpha=0.7, markersize=3,
-                color=cmap(i), label=n)
+        mean_acf.append(vals)
+        ax.plot(lags, vals, "-", alpha=0.2, markersize=3,
+                color=color, label=n)
+    mean_acf = np.array(mean_acf)
+    ax.plot(lags, np.nanmean(mean_acf, axis=0), "-o", color="k", linewidth=2,
+            label="mean")
     ax.axhline(0, color="gray", linestyle="--", linewidth=0.8)
     ax.set_xlabel("Lag (frames)")
     ax.set_ylabel("ACF")
@@ -98,11 +102,16 @@ def _line_acf(ax, per_video: dict, names: list, color: str = _COLOR) -> None:
 
 def _line_spectra(ax, per_video: dict, names: list, color: str = _COLOR) -> None:
     """Overlay log-log radial power spectra."""
-    cmap = plt.get_cmap("tab10")
-    for i, n in enumerate(names[:10]):
+    mean_profile = []
+    for i, n in enumerate(names):
         profile = per_video[n].get("spatial_power_spectrum", {}).get("radial_profile", [])
         if profile:
-            ax.semilogy(profile, alpha=0.7, color=cmap(i), label=n)
+            ax.semilogy(profile, alpha=0.2, color=color, label=n)
+            mean_profile.append(profile)
+    if mean_profile:
+        mean_profile = np.array(mean_profile)
+        ax.semilogy(list(range(1, mean_profile.shape[1] + 1)), np.mean(mean_profile, axis=0),
+                    "-", color="k", linewidth=2, label="Mean")
     ax.set_xlabel("Spatial frequency bin")
     ax.set_ylabel("Power (log)")
     ax.set_title(
@@ -136,14 +145,23 @@ def plot_metric_bars(real_vals, gen_vals, metric_name, ax) -> None:
 
 def plot_acf_comparison(real_results, gen_results, ax) -> None:
     lags = list(range(1, 11))
-    for vid_data in list(real_results.get("per_video", {}).values())[:5]:
+    mean_acf_real = []
+    for vid_data in list(real_results.get("per_video", {}).values()):
         acf  = vid_data.get("temporal_acf", {})
         vals = [acf.get(f"lag_{k}", float("nan")) for k in lags]
-        ax.plot(lags, vals, "b-o", alpha=0.4, markersize=3)
-    for vid_data in list(gen_results.get("per_video", {}).values())[:5]:
+        mean_acf_real.append(vals)
+        ax.plot(lags, vals, "b", alpha=0.1)
+    mean_acf_real = np.array(mean_acf_real)
+    ax.plot(lags, np.mean(mean_acf_real, axis=0), "b-o", linewidth=2, label="Real")
+    
+    mean_acf_gen = []
+    for vid_data in list(gen_results.get("per_video", {}).values()):
         acf  = vid_data.get("temporal_acf", {})
         vals = [acf.get(f"lag_{k}", float("nan")) for k in lags]
-        ax.plot(lags, vals, "r-s", alpha=0.4, markersize=3)
+        mean_acf_gen.append(vals)
+        ax.plot(lags, vals, "r", alpha=0.1)
+    mean_acf_gen = np.array(mean_acf_gen)
+    ax.plot(lags, np.mean(mean_acf_gen, axis=0), "r-o", linewidth=2, label="Generated")
     ax.legend(handles=[Line2D([0], [0], color="b", label="Real"),
                         Line2D([0], [0], color="r", label="Generated")])
     ax.axhline(0, color="gray", linestyle="--", linewidth=0.8)
@@ -153,14 +171,23 @@ def plot_acf_comparison(real_results, gen_results, ax) -> None:
 
 
 def plot_power_spectra(real_results, gen_results, ax) -> None:
-    for vid_data in list(real_results.get("per_video", {}).values())[:5]:
+    mean_profile_real = []
+    for vid_data in list(real_results.get("per_video", {}).values()):
         profile = vid_data.get("spatial_power_spectrum", {}).get("radial_profile", [])
         if profile:
-            ax.semilogy(profile, "b-", alpha=0.4)
-    for vid_data in list(gen_results.get("per_video", {}).values())[:5]:
+            ax.semilogy(profile, "b-", alpha=0.1)
+            mean_profile_real.append(profile)
+    mean_profile_real = np.array(mean_profile_real)
+    ax.plot(list(range(1, len(mean_profile_real[0]) + 1)), np.mean(mean_profile_real, axis=0), "b-", linewidth=2, label="Real")
+    
+    mean_profile_gen = []
+    for vid_data in list(gen_results.get("per_video", {}).values()):
         profile = vid_data.get("spatial_power_spectrum", {}).get("radial_profile", [])
         if profile:
-            ax.semilogy(profile, "r-", alpha=0.4)
+            ax.semilogy(profile, "r-", alpha=0.1)
+            mean_profile_gen.append(profile)
+    mean_profile_gen = np.array(mean_profile_gen)
+    ax.plot(list(range(1, len(mean_profile_gen[0]) + 1)), np.mean(mean_profile_gen, axis=0), "r-", linewidth=2, label="Generated")
     ax.legend(handles=[Line2D([0], [0], color="b", label="Real"),
                         Line2D([0], [0], color="r", label="Generated")])
     ax.set_xlabel("Spatial frequency (radial)")
@@ -169,12 +196,12 @@ def plot_power_spectra(real_results, gen_results, ax) -> None:
 
 
 def plot_noise_histograms(noise_real, noise_gen, ax) -> None:
-    for vid_data in list(noise_real.get("per_video", {}).values())[:3]:
+    for vid_data in list(noise_real.get("per_video", {}).values()):
         s  = vid_data.get("statistics", {})
         mu, sigma = s.get("mean", 0), s.get("std", 1)
         x  = np.linspace(mu - 4 * sigma, mu + 4 * sigma, 200)
         ax.plot(x, norm.pdf(x, mu, sigma), "b-", alpha=0.5)
-    for vid_data in list(noise_gen.get("per_video", {}).values())[:3]:
+    for vid_data in list(noise_gen.get("per_video", {}).values()):
         s  = vid_data.get("statistics", {})
         mu, sigma = s.get("mean", 0), s.get("std", 1)
         x  = np.linspace(mu - 4 * sigma, mu + 4 * sigma, 200)
@@ -574,17 +601,21 @@ def _figure_06_motion_structure(per_video: dict, names: list,
 
     # multiscale SSIM — line per video, x=scale index
     ax_ms = axes[0, 1]
-    cmap = plt.get_cmap("tab10")
     has_data = False
-    for i, n in enumerate(names[:10]):
+    mean_ms = []
+    for i, n in enumerate(names):
         ms = per_video[n].get("multiscale_ssim", {})
         scales = sorted(k for k in ms if k.startswith("scale_"))
         if not scales:
             continue
         xs = [int(k.split("_")[1]) for k in scales]
         ys = [ms[k].get("ssim_mean", float("nan")) for k in scales]
-        ax_ms.plot(xs, ys, "-o", markersize=4, alpha=0.7, color=cmap(i), label=n)
+        ax_ms.plot(xs, ys, "-", markersize=4, alpha=0.2, color="blue", label=n)
         has_data = True
+        mean_ms.append(ys)
+    if mean_ms:
+        mean_ms = np.array(mean_ms)
+        ax_ms.plot(xs, np.mean(mean_ms, axis=0), "-o", color="k", linewidth=2, label="Mean")
     ax_ms.set_xlabel("Scale index (0=full, 1=½, 2=¼, …)")
     ax_ms.set_ylabel("SSIM mean")
     ax_ms.set_title(
@@ -600,12 +631,17 @@ def _figure_06_motion_structure(per_video: dict, names: list,
     ax_mi = axes[1, 0]
     lags = list(range(1, 6))
     has_data = False
-    for i, n in enumerate(names[:10]):
+    mean_mi = []
+    for i, n in enumerate(names):
         mi = per_video[n].get("temporal_mi", {})
         vals_mi = [mi.get(f"lag_{k}", float("nan")) for k in lags]
         if any(np.isfinite(v) for v in vals_mi):
-            ax_mi.plot(lags, vals_mi, "-o", markersize=4, alpha=0.7, color=cmap(i), label=n)
+            ax_mi.plot(lags, vals_mi, "-", markersize=4, alpha=0.2, color="green", label=n)
+            mean_mi.append(vals_mi)
             has_data = True
+    if mean_mi:
+        mean_mi = np.array(mean_mi)
+        ax_mi.plot(lags, np.mean(mean_mi, axis=0), "-o", color="k", linewidth=2, label="Mean")
     ax_mi.axhline(0, color="gray", linestyle="--", linewidth=0.8)
     ax_mi.set_xlabel("Lag (frames)")
     ax_mi.set_ylabel("MI (bits)")
@@ -686,13 +722,12 @@ def _figure_07_noise_covariance(noise_results: dict, names: list,
 
     # cumulative explained variance — lines per video
     ax_cum = axes[1, 0]
-    cmap = plt.get_cmap("tab10")
     has_data = False
-    for i, n in enumerate(names[:10]):
+    for i, n in enumerate(names):
         cev = noise_pv.get(n, {}).get("covariance_structure", {}).get(
             "eigenvalue_explained_variance", [])
         if cev:
-            ax_cum.plot(range(1, len(cev) + 1), cev, "-", alpha=0.7, color=cmap(i), label=n)
+            ax_cum.plot(range(1, len(cev) + 1), cev, "-", alpha=0.7, color="mediumseagreen", label=n)
             has_data = True
     ax_cum.set_xlabel("Eigenvalue index")
     ax_cum.set_ylabel("Cumulative explained variance")
@@ -709,13 +744,13 @@ def _figure_07_noise_covariance(noise_results: dict, names: list,
     # normalised eigenspectra (log scale)
     ax_eig = axes[1, 1]
     has_data = False
-    for i, n in enumerate(names[:10]):
+    for i, n in enumerate(names):
         cev = noise_pv.get(n, {}).get("covariance_structure", {}).get(
             "eigenvalue_explained_variance", [])
         if len(cev) > 1:
             marginal = np.diff([0.0] + list(cev))
             ax_eig.semilogy(range(1, len(marginal) + 1), marginal + 1e-9,
-                            "-", alpha=0.7, color=cmap(i), label=n)
+                            "-", alpha=0.7, color="mediumseagreen", label=n)
             has_data = True
     ax_eig.set_xlabel("Eigenvalue index")
     ax_eig.set_ylabel("Marginal variance (log)")

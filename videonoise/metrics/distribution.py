@@ -42,29 +42,90 @@ def _frames_to_uint8(videos: list[torch.Tensor]) -> torch.Tensor:
 # FVD
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _extract_video_features(
+    videos: list[torch.Tensor],
+    device: torch.device,
+    batch_size: int = 4,
+    clip_len: int = 16,
+) -> np.ndarray:
+    """
+    Extract spatiotemporal features from a list of (T, C, H, W) video tensors
+    using torchvision's R3D-18 backbone (no extra pip installs required).
+
+    Videos are resized to 112×112 (standard R3D input), temporally sampled to
+    *clip_len* frames, and passed through the network with the classification
+    head removed.  Returns an (N, 512) float64 feature matrix.
+    """
+    import torchvision.models.video as vm
+
+    # Load R3D-18 with pretrained Kinetics-400 weights (cached after first use)
+    weights = vm.R3D_18_Weights.KINETICS400_V1
+    backbone = vm.r3d_18(weights=weights)
+    backbone.fc = torch.nn.Identity()  # drop classifier → 512-d features
+    backbone = backbone.to(device).eval()
+
+    # R3D normalisation (ImageNet-style, applied per-frame)
+    mean = torch.tensor([0.43216, 0.394666, 0.37645], device=device).view(1, 3, 1, 1, 1)
+    std  = torch.tensor([0.22803, 0.22145,  0.216989], device=device).view(1, 3, 1, 1, 1)
+
+    feats: list[np.ndarray] = []
+    with torch.no_grad():
+        for start in range(0, len(videos), batch_size):
+            batch_clips = []
+            for v in videos[start : start + batch_size]:
+                # v: (T, C, H, W) float in [0,1]
+                T = v.shape[0]
+                # Temporal sampling → clip_len frames
+                idx = torch.linspace(0, T - 1, clip_len).long()
+                clip = v[idx].float()  # (clip_len, C, H, W)
+
+                # Spatial resize to 112×112
+                clip = torch.nn.functional.interpolate(
+                    clip, size=(112, 112), mode="bilinear", align_corners=False,
+                )
+                # R3D expects (C, T, H, W)
+                batch_clips.append(clip.permute(1, 0, 2, 3))
+
+            # Stack → (B, C, T, H, W)
+            x = torch.stack(batch_clips).to(device)
+            x = (x - mean) / std
+            f = backbone(x)  # (B, 512)
+            feats.append(f.cpu().float().numpy())
+
+    return np.concatenate(feats, axis=0).astype(np.float64)
+
+
+def _frechet_distance(mu1: np.ndarray, sigma1: np.ndarray,
+                      mu2: np.ndarray, sigma2: np.ndarray) -> float:
+    """Fréchet distance between two multivariate Gaussians."""
+    from scipy import linalg
+
+    diff = mu1 - mu2
+    # Symmetric matrix square root of sigma1 @ sigma2
+    covmean, _ = linalg.sqrtm(sigma1 @ sigma2, disp=False)
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    return float(diff @ diff + np.trace(sigma1 + sigma2 - 2 * covmean))
+
+
 def compute_fvd(
     real_folder: str,
     gen_folder: str,
     max_frames: int = 32,
     resize: Optional[tuple[int, int]] = None,
     device: Optional[torch.device] = None,
+    batch_size: int = 4,
+    clip_len: int = 16,
 ) -> float:
     """
     Fréchet Video Distance between real and generated video sets.
 
-    Requires: pip install frechet-video-distance
+    Uses torchvision's R3D-18 (Kinetics-400 pretrained) as the feature
+    extractor — no TensorFlow or extra pip installs required.
 
     Returns:
         FVD scalar (lower = more similar distributions).
     """
-    try:
-        from frechet_video_distance import frechet_video_distance
-    except ImportError:
-        raise ImportError(
-            "pip install frechet-video-distance\n"
-            "See: https://github.com/google-research/google-research/tree/master/frechet_video_distance"
-        )
-
     if device is None:
         from videonoise.utils import get_device
         device = get_device()
@@ -73,18 +134,39 @@ def compute_fvd(
     gen_vids  = _load_video_tensors(gen_folder,  max_frames, resize, device)
 
     if len(real_vids) < 2 or len(gen_vids) < 2:
-        raise ValueError(f"FVD requires ≥ 2 videos per set (got {len(real_vids)} real, {len(gen_vids)} gen)")
+        raise ValueError(
+            f"FVD requires ≥ 2 videos per set (got {len(real_vids)} real, {len(gen_vids)} gen)"
+        )
 
-    real_uint8 = _frames_to_uint8(real_vids)  # (N, T, C, H, W)
-    gen_uint8  = _frames_to_uint8(gen_vids)
+    print(f"        Extracting R3D-18 features for {len(real_vids)} real videos...")
+    real_feats = _extract_video_features(real_vids, device, batch_size, clip_len)
+    print(f"        Extracting R3D-18 features for {len(gen_vids)} generated videos...")
+    gen_feats  = _extract_video_features(gen_vids,  device, batch_size, clip_len)
 
-    fvd = frechet_video_distance(real_uint8, gen_uint8)
-    return float(fvd)
+    mu_r, sigma_r = real_feats.mean(0), np.cov(real_feats, rowvar=False)
+    mu_g, sigma_g = gen_feats.mean(0),  np.cov(gen_feats,  rowvar=False)
+
+    return _frechet_distance(mu_r, sigma_r, mu_g, sigma_g)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cross-set LPIPS
 # ─────────────────────────────────────────────────────────────────────────────
+
+_LPIPS_MAX_SIDE = 256  # LPIPS is a perceptual metric; full-res is wasteful and slow
+
+
+def _lpips_resize(frames: torch.Tensor) -> torch.Tensor:
+    """Downscale (T, C, H, W) so the longer side ≤ _LPIPS_MAX_SIDE."""
+    H, W = frames.shape[-2], frames.shape[-1]
+    scale = _LPIPS_MAX_SIDE / max(H, W)
+    if scale >= 1.0:
+        return frames
+    nH, nW = max(1, int(H * scale)), max(1, int(W * scale))
+    return torch.nn.functional.interpolate(
+        frames, size=(nH, nW), mode="bilinear", align_corners=False,
+    )
+
 
 def compute_lpips_between_sets(
     real_folder: str,
@@ -92,6 +174,7 @@ def compute_lpips_between_sets(
     max_frames: int = 32,
     resize: Optional[tuple[int, int]] = None,
     device: Optional[torch.device] = None,
+    batch_size: int = 16,
 ) -> dict:
     """
     Compute LPIPS metrics:
@@ -99,6 +182,9 @@ def compute_lpips_between_sets(
     - lpips_temporal_gen:  same for generated
     - lpips_real_vs_gen:   mean LPIPS between corresponding real/gen frames at each timestep
                            (only computed if real and gen video counts match)
+
+    Frames are downscaled to ≤256px before LPIPS (perceptual metric — full res is wasteful).
+    Frame pairs are batched for throughput.
 
     Returns:
         Dict with lpips_temporal_real, lpips_temporal_gen,
@@ -120,16 +206,23 @@ def compute_lpips_between_sets(
     gen_vids  = _load_video_tensors(gen_folder,  max_frames, resize, device)
 
     def _temporal_lpips(vids: list[torch.Tensor], label: str) -> float:
-        vals = []
+        """Mean LPIPS between consecutive frames, batched across all pairs in a video."""
+        all_vals: list[float] = []
         with torch.no_grad():
             for v in tqdm(vids, desc=f"LPIPS temporal {label}", unit="video", leave=False):
-                frames = v.float() * 2 - 1
+                frames = _lpips_resize(v.float() * 2 - 1)  # (T, C, H, W) in [-1,1]
                 if frames.shape[1] == 1:
                     frames = frames.expand(-1, 3, -1, -1)
-                for t in range(frames.shape[0] - 1):
-                    d = loss_fn(frames[t:t + 1], frames[t + 1:t + 2]).item()
-                    vals.append(float(d))
-        return float(np.mean(vals)) if vals else float("nan")
+                T = frames.shape[0]
+                # collect consecutive pairs into batches
+                for start in range(0, T - 1, batch_size):
+                    end = min(start + batch_size, T - 1)
+                    a = frames[start:end]          # (B, C, H, W)
+                    b = frames[start + 1:end + 1]
+                    d = loss_fn(a, b)              # (B, 1, 1, 1)
+                    all_vals.extend(d.squeeze().tolist()
+                                    if d.numel() > 1 else [d.item()])
+        return float(np.mean(all_vals)) if all_vals else float("nan")
 
     result = {
         "lpips_temporal_real": _temporal_lpips(real_vids, "real"),
@@ -138,7 +231,7 @@ def compute_lpips_between_sets(
 
     # Cross-set: only if counts match (matched pairs scenario)
     if len(real_vids) == len(gen_vids) and real_vids:
-        cross_vals = []
+        cross_vals: list[float] = []
         min_T = min(
             min(r.shape[0] for r in real_vids),
             min(g.shape[0] for g in gen_vids),
@@ -146,15 +239,17 @@ def compute_lpips_between_sets(
         with torch.no_grad():
             for rv, gv in tqdm(zip(real_vids, gen_vids), desc="LPIPS real↔gen",
                                 total=len(real_vids), unit="pair", leave=False):
-                rf = rv[:min_T].float() * 2 - 1
-                gf = gv[:min_T].float() * 2 - 1
+                rf = _lpips_resize(rv[:min_T].float() * 2 - 1)
+                gf = _lpips_resize(gv[:min_T].float() * 2 - 1)
                 if rf.shape[1] == 1:
                     rf = rf.expand(-1, 3, -1, -1)
                 if gf.shape[1] == 1:
                     gf = gf.expand(-1, 3, -1, -1)
-                for t in range(min_T):
-                    d = loss_fn(rf[t:t + 1], gf[t:t + 1]).item()
-                    cross_vals.append(float(d))
+                for start in range(0, min_T, batch_size):
+                    end = min(start + batch_size, min_T)
+                    d = loss_fn(rf[start:end], gf[start:end])
+                    cross_vals.extend(d.squeeze().tolist()
+                                      if d.numel() > 1 else [d.item()])
         result["lpips_real_vs_gen_mean"] = float(np.mean(cross_vals))
 
     return result

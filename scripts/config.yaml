@@ -6,7 +6,7 @@
 
 # --- Paths ---
 data_real: data/matched_pairs/deepaction_all/real #data/real/DAVIS/Videos/480p/
-data_gen:  data/matched_pairs/deepaction_all/generated_RunawayML/ #data/generated/      # parent dir; run key (<model>_<noise_type>) appended automatically
+data_gen:  data/matched_pairs/deepaction_all/generated_RunwayML/ #data/generated/      # parent dir; run key (<model>_<noise_type>) appended automatically
 results:   results/
 
 # --- Matched-pairs override ---
@@ -18,7 +18,7 @@ results:   results/
 #   data_real: data/matched_pairs/deepaction_all/real/
 #   gen_dir:   data/matched_pairs/deepaction_all/generated_CogVideoX5B/
 #
-gen_dir: data/matched_pairs/deepaction_all/generated_RunawayML/
+gen_dir: data/matched_pairs/deepaction_all/generated_RunwayML/
 
 # --- Video loading ---
 max_frames: 64 #32

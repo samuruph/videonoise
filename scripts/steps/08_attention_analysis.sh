@@ -5,5 +5,5 @@
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/../.." && pwd)"
 
-python -m videonoise.scripts.attention_analysis \
+python -m videonoise.scripts.attention_analysis --config scripts/config.yaml \
     --n_videos 3

@@ -157,10 +157,6 @@ def _run_generation_with_hooks(pipe, cfg, model_type: str, device):
 
 def main() -> None:
     parser = build_parser("Step 08 — Attention analysis")
-    parser.add_argument(
-        "--n_videos", type=int, default=3,
-        help="Number of videos to process for attention extraction (default: 3)",
-    )
     args = parser.parse_args()
     cfg  = load_config(args)
 

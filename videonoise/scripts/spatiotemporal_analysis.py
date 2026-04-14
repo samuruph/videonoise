@@ -19,6 +19,8 @@ def main() -> None:
 
     real_st = Path(cfg.real_out) / "spatiotemporal"
     gen_st  = Path(cfg.gen_out)  / "spatiotemporal"
+    real_st_json = real_st / "frequency_stats.json"
+    gen_st_json  = gen_st  / "frequency_stats.json"
 
     print("=" * 64)
     print("  Step 04 — Spatio-temporal analysis")
@@ -27,16 +29,22 @@ def main() -> None:
     print("=" * 64)
 
     print("\n  [1/2] Real videos...")
-    run_spatiotemporal_folder(
-        cfg.data_real, str(real_st),
-        max_frames=cfg.max_frames, resize=cfg.resize, use_pixel_pca=True,
-    )
+    if real_st_json.exists():
+        print(f"  [skip] {real_st_json} already exists")
+    else:
+        run_spatiotemporal_folder(
+            cfg.data_real, str(real_st),
+            max_frames=cfg.max_frames, resize=cfg.resize, use_pixel_pca=True, use_umap=False,
+        )
 
     print("\n  [2/2] Generated videos...")
-    run_spatiotemporal_folder(
-        cfg.gen_dir_resolved, str(gen_st),
-        max_frames=cfg.max_frames, resize=cfg.resize, use_pixel_pca=True,
-    )
+    if gen_st_json.exists():
+        print(f"  [skip] {gen_st_json} already exists")
+    else:
+        run_spatiotemporal_folder(
+            cfg.gen_dir_resolved, str(gen_st),
+            max_frames=cfg.max_frames, resize=cfg.resize, use_pixel_pca=True, use_umap=False,
+        )
 
 
 if __name__ == "__main__":
